@@ -1,0 +1,28 @@
+{
+  "name": "horas",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@fullcalendar/core": "^6.1.21",
+    "@fullcalendar/interaction": "^6.1.21",
+    "@fullcalendar/timegrid": "^6.1.21",
+    "@fullcalendar/vue3": "^6.1.21",
+    "@mdi/font": "^7.4.47",
+    "vue": "^3.5.42",
+    "vuetify": "^4.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "@vue/tsconfig": "^0.9.1",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0",
+    "vue-tsc": "^3.3.11"
+  }
+}
