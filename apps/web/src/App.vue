@@ -16,13 +16,23 @@ type Project = {
 }
 
 const defaultProjects: Project[] = [
-  { id: 'aurora', name: 'Aurora Studio', color: '#c95f45', tint: '#f7c8bb' },
-  { id: 'northstar', name: 'Northstar', color: '#267d69', tint: '#bfe4d8' },
-  { id: 'fieldnotes', name: 'Fieldnotes', color: '#4f70b5', tint: '#c9d8f5' },
-  { id: 'internal', name: 'Interno', color: '#a87825', tint: '#f2dead' },
+  { id: 'jns', name: 'JNS', color: '#4f70b5', tint: '#c9d8f5' },
 ]
 
+const dataVersionStorageKey = 'horas.data-version'
+const currentDataVersion = '2026-10-jns'
 const projectsStorageKey = 'horas.projects'
+
+function resetStoredDataOnce() {
+  if (localStorage.getItem(dataVersionStorageKey) === currentDataVersion) return
+
+  Object.keys(localStorage)
+    .filter((key) => key.startsWith('horas.'))
+    .forEach((key) => localStorage.removeItem(key))
+  localStorage.setItem(dataVersionStorageKey, currentDataVersion)
+}
+
+resetStoredDataOnce()
 
 function loadProjects(): Project[] {
   try {
@@ -75,42 +85,13 @@ const weekStart = ref(weekStartFor(new Date()))
 const visibleRangeStart = ref(new Date(weekStart.value))
 const visibleRangeEnd = ref(new Date(weekStart.value.getTime() + 7 * 24 * 60 * 60 * 1000))
 
-function demoEvent(day: number, startHour: number, startMinute: number, duration: number, projectId: string, title: string, hours: number): EventInput {
-  const start = new Date(weekStart.value)
-  start.setDate(start.getDate() + day)
-  start.setHours(startHour, startMinute, 0, 0)
-  const end = new Date(start.getTime() + duration * 60_000)
-  const project = projects.value.find((item) => item.id === projectId) ?? defaultProjects[0]
-  return {
-    id: `${projectId}-${day}-${startHour}`,
-    title,
-    start,
-    end,
-    backgroundColor: project.tint,
-    borderColor: project.color,
-    textColor: '#252923',
-    extendedProps: { projectId, hours },
-  }
-}
-
-const demoEvents: EventInput[] = [
-  demoEvent(0, 9, 0, 90, 'aurora', 'Direção de arte', 1.5),
-  demoEvent(0, 13, 30, 120, 'northstar', 'Revisão de produto', 2),
-  demoEvent(1, 10, 0, 120, 'fieldnotes', 'Pesquisa de conteúdo', 2),
-  demoEvent(1, 14, 0, 90, 'aurora', 'Apresentação da marca', 1.5),
-  demoEvent(2, 9, 30, 150, 'northstar', 'Planejamento da sprint', 2.5),
-  demoEvent(3, 11, 0, 60, 'internal', 'Reunião semanal', 1),
-  demoEvent(3, 14, 0, 120, 'fieldnotes', 'Protótipo de navegação', 2),
-  demoEvent(4, 9, 0, 90, 'aurora', 'Ajustes finais', 1.5),
-]
-
 const sessionStorageKey = 'horas.session'
 const weeklyGoalStorageKey = (userId: string) => `horas.weekly-goal.${userId}`
 
 function loadWeeklyGoal(userId?: string) {
-  if (!userId) return 32
+  if (!userId) return 40
   const savedGoal = Number(localStorage.getItem(weeklyGoalStorageKey(userId)))
-  return Number.isFinite(savedGoal) && savedGoal > 0 ? savedGoal : 32
+  return Number.isFinite(savedGoal) && savedGoal > 0 ? savedGoal : 40
 }
 
 function loadSession(): MockUser | null {
@@ -138,9 +119,9 @@ function loadEvents(userId?: string): EventInput[] {
   if (!userId) return []
   try {
     const storedEvents = localStorage.getItem(eventsStorageKey(userId))
-    return storedEvents ? JSON.parse(storedEvents) as EventInput[] : demoEvents
+    return storedEvents ? JSON.parse(storedEvents) as EventInput[] : []
   } catch {
-    return demoEvents
+    return []
   }
 }
 
@@ -321,6 +302,7 @@ const exportEntries = computed(() => users.value.flatMap((user) => {
   return userEvents.map((event) => ({
     userId: user.id,
     title: String(event.title ?? ''),
+    projectId: String(event.extendedProps?.projectId ?? ''),
     start: new Date(event.start as string | Date).toISOString(),
     end: new Date(event.end as string | Date).toISOString(),
   }))

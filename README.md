@@ -1,12 +1,20 @@
 # Horasculo
 
-![Ícone do Horasculo](public/brand/horasculo-icon.png)
+![Ícone do Horasculo](apps/web/public/brand/horasculo-icon.png)
 
 O Horasculo é uma interface de controle de horas de trabalho. O sistema organiza registros em um calendário, separa as horas por projeto e apresenta totais diários e semanais para facilitar o acompanhamento da jornada.
 
-## Estado do projeto
+## Estrutura do projeto
 
-Este projeto contém **somente o front-end**. Não há API, banco de dados ou servidor de autenticação.
+O Horasculo é organizado como um monorepo:
+
+```text
+apps/
+├── api/    # API Rust com Axum
+└── web/    # front-end Vue 3
+```
+
+A API possui inicialmente um health check e a estrutura base para receber os módulos de autenticação, usuários, projetos e registros de horas. O front ainda usa dados simulados no `localStorage`; a integração com a API será feita nas próximas etapas.
 
 Os usuários, projetos, registros, sessão e metas semanais são simulados e armazenados no `localStorage` do navegador. Portanto, os dados:
 
@@ -79,8 +87,8 @@ O emblema de olho e relógio representa a proposta do Horasculo: visualizar, reg
 
 Os arquivos usados pela aplicação estão em:
 
-- `public/brand/horasculo-icon.png`: marca exibida na interface e em atalhos;
-- `public/brand/horasculo-favicon.png`: ícone exibido na aba do navegador.
+- `apps/web/public/brand/horasculo-icon.png`: marca exibida na interface e em atalhos;
+- `apps/web/public/brand/horasculo-favicon.png`: ícone exibido na aba do navegador.
 
 ## Tecnologias
 
@@ -90,26 +98,55 @@ Os arquivos usados pela aplicação estão em:
 - Vuetify
 - FullCalendar
 - Material Design Icons
+- Rust
+- Axum
+- Tokio
 
 ## Como executar
 
-Requisitos: Node.js e npm instalados.
+### Front-end
+
+Requisitos: Node.js e npm instalados. Na raiz do repositório:
 
 ```bash
 npm install
-npm run dev
+npm run dev:web
 ```
 
 O terminal exibirá o endereço local da aplicação.
 
+### API
+
+Requisitos: Rust e Cargo instalados. Na raiz do repositório:
+
+```bash
+cargo run -p horasculo-api
+```
+
+A API será iniciada em `http://127.0.0.1:3000`. O endpoint inicial é:
+
+```text
+GET /api/health
+```
+
+As variáveis disponíveis estão documentadas em `apps/api/.env.example`. Elas podem ser definidas no ambiente antes de iniciar a API.
+
 ## Compilação de produção
 
 ```bash
-npm run build
+npm run build:web
 ```
 
 Para visualizar localmente o resultado compilado:
 
 ```bash
-npm run preview
+npm run preview:web
+```
+
+Para verificar o backend:
+
+```bash
+cargo test --workspace
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
 ```

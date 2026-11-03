@@ -4,7 +4,7 @@ import type { MockUser, MockUserInput } from '../services/mockApi'
 
 type Project = { id: string; name: string; color: string; tint: string }
 type HoursEntry = { userId: string; projectId: string; hours: number }
-type ExportEntry = { userId: string; title: string; start: string; end: string }
+type ExportEntry = { userId: string; projectId: string; title: string; start: string; end: string }
 
 const props = withDefaults(defineProps<{
   projects: Project[]
@@ -129,6 +129,11 @@ function formatHours(hours: number) {
   return hours.toLocaleString('pt-BR', { maximumFractionDigits: 2 })
 }
 
+function formatTime(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
 function escapeXml(value: string) {
   return value
     .replaceAll('&', '&amp;')
@@ -177,7 +182,7 @@ function exportSpreadsheet() {
     return
   }
 
-  const header = ['Nome do evento', 'Início', 'Fim', 'Data']
+  const header = ['Descrição', 'Projeto', 'Data', 'Inicio', 'Fim']
     .map((label) => `<Cell ss:StyleID="Header"><Data ss:Type="String">${label}</Data></Cell>`)
     .join('')
   const usedNames = new Set<string>()
@@ -192,17 +197,19 @@ function exportSpreadsheet() {
       .map((entry) => {
         const start = new Date(entry.start)
         const end = new Date(entry.end)
+        const project = props.projects.find((item) => item.id === entry.projectId)
         const values = [
           entry.title,
-          start.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-          end.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+          project?.name ?? '',
           formatDate(start),
+          formatTime(start),
+          formatTime(end),
         ]
         return `<Row>${values.map((value) => `<Cell><Data ss:Type="String">${escapeXml(value)}</Data></Cell>`).join('')}</Row>`
       })
       .join('')
     const sheetName = uniqueSheetName(user.name, usedNames)
-    return `<Worksheet ss:Name="${escapeXml(sheetName)}"><Table><Column ss:Width="220"/><Column ss:Width="75"/><Column ss:Width="75"/><Column ss:Width="85"/><Row>${header}</Row>${rows}</Table></Worksheet>`
+    return `<Worksheet ss:Name="${escapeXml(sheetName)}"><Table><Column ss:Width="220"/><Column ss:Width="100"/><Column ss:Width="85"/><Column ss:Width="75"/><Column ss:Width="75"/><Row>${header}</Row>${rows}</Table></Worksheet>`
   }).join('')
 
   const workbook = `<?xml version="1.0" encoding="UTF-8"?><?mso-application progid="Excel.Sheet"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"><Styles><Style ss:ID="Header"><Font ss:Bold="1"/><Interior ss:Color="#EAF4EF" ss:Pattern="Solid"/></Style></Styles>${worksheets}</Workbook>`
