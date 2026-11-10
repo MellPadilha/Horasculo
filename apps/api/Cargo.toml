@@ -6,9 +6,19 @@ license.workspace = true
 
 [dependencies]
 axum.workspace = true
+axum-extra.workspace = true
+argon2.workspace = true
+chrono.workspace = true
+hex.workspace = true
+rand.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
 thiserror.workspace = true
+time.workspace = true
 tokio.workspace = true
 tower-http.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+uuid.workspace = true

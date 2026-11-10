@@ -29,9 +29,6 @@ button { font: inherit; }
 .login-form { display: flex; flex-direction: column; gap: 4px; }
 .login-button.v-btn { height: 43px; margin-top: 2px; border-radius: 6px; background: var(--accent); color: #fff; font-size: 13px; font-weight: 650; letter-spacing: 0; }
 .login-button.v-btn:hover { background: #c95236; }
-.demo-access { margin-top: 23px; padding: 13px 15px; display: flex; flex-direction: column; gap: 4px; border-radius: 6px; background: #f5f7f3; color: #747b73; font-size: 11px; }
-.demo-access strong { margin-bottom: 2px; color: #505850; font-weight: 650; }
-.demo-access code { color: #39463e; font-size: 11px; }
 
 .sidebar {
   width: 248px;

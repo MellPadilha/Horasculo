@@ -1,4 +1,5 @@
 use horasculo_api::{app, config::Config, state::AppState};
+use sqlx::postgres::PgPoolOptions;
 use tokio::net::TcpListener;
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -13,10 +14,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let config = Config::from_env()?;
+    let db = PgPoolOptions::new()
+        .max_connections(10)
+        .connect(&config.database_url)
+        .await?;
+    sqlx::migrate!("./migrations").run(&db).await?;
+    horasculo_api::bootstrap::run(&db, &config).await?;
     let listener = TcpListener::bind(config.address()).await?;
 
     info!(address = %config.address(), "API iniciada");
-    axum::serve(listener, app(AppState::new()))
+    axum::serve(listener, app(AppState::new(db, config)))
         .with_graceful_shutdown(shutdown_signal())
         .await?;
 

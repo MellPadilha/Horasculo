@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import type { MockUser, MockUserInput } from '../services/mockApi'
+import type { User, UserInput } from '../services/api'
 
 type Project = { id: string; name: string; color: string; tint: string }
 type HoursEntry = { userId: string; projectId: string; hours: number }
@@ -8,13 +8,14 @@ type ExportEntry = { userId: string; projectId: string; title: string; start: st
 
 const props = withDefaults(defineProps<{
   projects: Project[]
-  users: MockUser[]
+  users: User[]
   hoursEntries: HoursEntry[]
   exportEntries?: ExportEntry[]
   currentUserId: string
   loadingUsers: boolean
   errorMessage: string
   weeklyGoal: number
+  isAdmin: boolean
 }>(), {
   exportEntries: () => [],
 })
@@ -23,7 +24,7 @@ const emit = defineEmits<{
   addProject: [project: Project]
   deleteProject: [projectId: string]
   updateWeeklyGoal: [goal: number]
-  saveUser: [user: MockUserInput]
+  saveUser: [user: UserInput]
   deleteUser: [userId: string]
 }>()
 
@@ -48,7 +49,7 @@ const projectError = ref('')
 const weeklyGoalError = ref('')
 const exportError = ref('')
 const userError = ref('')
-const userForm = reactive<MockUserInput>({ name: '', username: '', password: '' })
+const userForm = reactive<UserInput>({ name: '', username: '', password: '', role: 'user' })
 const today = new Date()
 const formatDate = (date: Date) => new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(date)
 const firstDay = new Date(today.getFullYear(), today.getMonth(), 1)
@@ -100,13 +101,13 @@ function saveWeeklyGoal() {
 }
 
 function openNewUser() {
-  Object.assign(userForm, { id: undefined, name: '', username: '', password: '' })
+  Object.assign(userForm, { id: undefined, name: '', username: '', password: '', role: 'user' })
   userError.value = ''
   userDialog.value = true
 }
 
-function openEditUser(user: MockUser) {
-  Object.assign(userForm, { id: user.id, name: user.name, username: user.username, password: '' })
+function openEditUser(user: User) {
+  Object.assign(userForm, { id: user.id, name: user.name, username: user.username, password: '', role: user.role })
   userError.value = ''
   userDialog.value = true
 }
@@ -233,11 +234,11 @@ function exportSpreadsheet() {
         <span class="eyebrow">ADMINISTRAÇÃO</span>
         <h1>Configurações</h1>
       </div>
-      <v-btn class="export-button" variant="outlined" prepend-icon="mdi-file-export-outline" @click="exportError = ''; exportDialog = true">Exportar dados</v-btn>
+      <v-btn v-if="isAdmin" class="export-button" variant="outlined" prepend-icon="mdi-file-export-outline" @click="exportError = ''; exportDialog = true">Exportar dados</v-btn>
     </header>
     <v-alert v-if="errorMessage" class="settings-alert" type="error" variant="tonal" density="compact">{{ errorMessage }}</v-alert>
 
-    <section class="settings-dashboard">
+    <section v-if="isAdmin" class="settings-dashboard">
       <div class="dashboard-heading">
         <div>
           <span class="eyebrow">VISÃO GERAL</span>
@@ -267,7 +268,7 @@ function exportSpreadsheet() {
       </form>
     </section>
 
-    <div class="settings-grid">
+    <div v-if="isAdmin" class="settings-grid">
       <section class="settings-card">
         <div class="settings-card-heading"><div><span class="eyebrow">CADASTRO</span><h2>Projetos</h2></div><div class="settings-heading-actions"><span>{{ projects.length }} projetos</span><v-btn class="small-primary-button" prepend-icon="mdi-plus" @click="openNewProject">Adicionar</v-btn></div></div>
         <v-table class="settings-table" density="compact">
@@ -336,6 +337,7 @@ function exportSpreadsheet() {
         <v-text-field v-model="userForm.name" label="Nome" variant="outlined" density="comfortable" />
         <v-text-field v-model="userForm.username" label="Usuário" variant="outlined" density="comfortable" />
         <v-text-field v-model="userForm.password" :label="userForm.id ? 'Nova senha (opcional)' : 'Senha'" type="password" variant="outlined" density="comfortable" />
+        <v-select v-model="userForm.role" :items="[{ title: 'Usuário', value: 'user' }, { title: 'Administrador', value: 'admin' }]" label="Papel" variant="outlined" density="comfortable" />
         <div class="modal-footer"><v-btn variant="text" @click="userDialog = false">Cancelar</v-btn><v-btn class="small-primary-button" @click="submitUser">Salvar</v-btn></div>
       </v-card>
     </v-dialog>

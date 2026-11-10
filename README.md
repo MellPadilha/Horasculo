@@ -14,19 +14,11 @@ apps/
 └── web/    # front-end Vue 3
 ```
 
-A API possui inicialmente um health check e a estrutura base para receber os módulos de autenticação, usuários, projetos e registros de horas. O front ainda usa dados simulados no `localStorage`; a integração com a API será feita nas próximas etapas.
+O front consome a API Rust, que persiste usuários, projetos, metas e registros no PostgreSQL. A autenticação usa uma sessão em cookie `HttpOnly`.
 
-Os usuários, projetos, registros, sessão e metas semanais são simulados e armazenados no `localStorage` do navegador. Portanto, os dados:
+## Primeiro acesso
 
-- ficam disponíveis apenas no navegador e dispositivo em que foram criados;
-- podem ser apagados ao limpar os dados do navegador;
-- não são sincronizados entre dispositivos;
-- não devem ser considerados seguros para uso em produção.
-
-## Acesso de demonstração
-
-- Usuário: `demo`
-- Senha: `12345`
+No primeiro boot, a API cria o administrador definido por `BOOTSTRAP_ADMIN_USERNAME` e `BOOTSTRAP_ADMIN_PASSWORD`. Use uma senha exclusiva com pelo menos 12 caracteres.
 
 ## Funcionalidades implementadas
 
@@ -56,13 +48,13 @@ Os usuários, projetos, registros, sessão e metas semanais são simulados e arm
 ### Meta semanal
 
 - Configuração da meta semanal de horas para cada usuário.
-- Persistência individual da meta no navegador.
+- Persistência individual da meta no PostgreSQL.
 - Indicador de progresso semanal no menu lateral.
 - Exibição das horas restantes para alcançar a meta.
 
 ### Usuários
 
-- Login e logout simulados.
+- Login e logout com sessão segura em cookie `HttpOnly`.
 - Cadastro, edição e exclusão de usuários.
 - Proteção contra a exclusão do usuário atualmente conectado.
 - Registros de calendário separados por usuário.
@@ -115,11 +107,14 @@ npm run dev:web
 
 O terminal exibirá o endereço local da aplicação.
 
-### API
+### API e banco
 
-Requisitos: Rust e Cargo instalados. Na raiz do repositório:
+Requisitos: Rust, Cargo e Docker instalados. Na raiz do repositório:
 
 ```bash
+docker compose up -d postgres
+cp apps/api/.env.example apps/api/.env
+set -a; source apps/api/.env; set +a
 cargo run -p horasculo-api
 ```
 
@@ -127,6 +122,7 @@ A API será iniciada em `http://127.0.0.1:3000`. O endpoint inicial é:
 
 ```text
 GET /api/health
+GET /api/ready
 ```
 
 As variáveis disponíveis estão documentadas em `apps/api/.env.example`. Elas podem ser definidas no ambiente antes de iniciar a API.
