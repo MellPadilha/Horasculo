@@ -29,7 +29,7 @@ pub async fn create(State(state): State<AppState>, admin: CurrentUser, Json(inpu
     admin.require_admin()?;
     let username = required(&input.username, "username")?.to_lowercase();
     let name = required(&input.name, "nome")?;
-    if input.password.len() < 8 { return Err(AppError::Validation("a senha deve ter pelo menos 8 caracteres".into())); }
+    if input.password.len() < 12 { return Err(AppError::Validation("a senha deve ter pelo menos 12 caracteres".into())); }
     let role = input.role.unwrap_or_else(|| "user".into()); validate_role(&role)?;
     if sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)").bind(&username).fetch_one(&state.db).await? {
         return Err(AppError::Conflict("este nome de usuário já está em uso".into()));
@@ -47,7 +47,7 @@ pub async fn update(State(state): State<AppState>, admin: CurrentUser, Path(id):
     let username = input.username.as_deref().map(|v| required(v,"username")).transpose()?.map(|v| v.to_lowercase());
     let name = input.name.as_deref().map(|v| required(v,"nome")).transpose()?;
     if let Some(role) = input.role.as_deref() { validate_role(role)?; }
-    if input.password.as_deref().is_some_and(|p| p.len() < 8) { return Err(AppError::Validation("a senha deve ter pelo menos 8 caracteres".into())); }
+    if input.password.as_deref().is_some_and(|p| p.len() < 12) { return Err(AppError::Validation("a senha deve ter pelo menos 12 caracteres".into())); }
     let password_changed = input.password.is_some();
     if let Some(candidate) = username.as_deref() {
         if sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM users WHERE username=$1 AND id<>$2)").bind(candidate).bind(id).fetch_one(&state.db).await? {
@@ -64,6 +64,13 @@ pub async fn update(State(state): State<AppState>, admin: CurrentUser, Path(id):
 pub async fn archive(State(state): State<AppState>, admin: CurrentUser, Path(id): Path<Uuid>) -> Result<(), AppError> {
     admin.require_admin()?; if id == admin.id { return Err(AppError::Validation("não é possível arquivar o usuário autenticado".into())); }
     let mut tx = state.db.begin().await?;
+    let target_is_admin = sqlx::query_scalar::<_, bool>("SELECT role = 'admin'::user_role FROM users WHERE id=$1 AND active=true")
+        .bind(id).fetch_optional(&mut *tx).await?.ok_or(AppError::NotFound)?;
+    if target_is_admin {
+        let admin_count = sqlx::query_scalar::<_, i64>("SELECT count(*) FROM users WHERE active=true AND role='admin'")
+            .fetch_one(&mut *tx).await?;
+        if admin_count <= 1 { return Err(AppError::Validation("não é possível arquivar o último administrador".into())); }
+    }
     if sqlx::query("UPDATE users SET active=false, updated_at=now() WHERE id=$1 AND active=true").bind(id).execute(&mut *tx).await?.rows_affected() == 0 { return Err(AppError::NotFound); }
     sqlx::query("DELETE FROM sessions WHERE user_id=$1").bind(id).execute(&mut *tx).await?; tx.commit().await?; Ok(())
 }

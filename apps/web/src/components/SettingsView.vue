@@ -4,21 +4,17 @@ import type { User, UserInput } from '../services/api'
 
 type Project = { id: string; name: string; color: string; tint: string }
 type HoursEntry = { userId: string; projectId: string; hours: number }
-type ExportEntry = { userId: string; projectId: string; title: string; start: string; end: string }
 
-const props = withDefaults(defineProps<{
+const props = defineProps<{
   projects: Project[]
   users: User[]
   hoursEntries: HoursEntry[]
-  exportEntries?: ExportEntry[]
   currentUserId: string
   loadingUsers: boolean
   errorMessage: string
   weeklyGoal: number
   isAdmin: boolean
-}>(), {
-  exportEntries: () => [],
-})
+}>()
 
 const emit = defineEmits<{
   addProject: [project: Project]
@@ -26,6 +22,7 @@ const emit = defineEmits<{
   updateWeeklyGoal: [goal: number]
   saveUser: [user: UserInput]
   deleteUser: [userId: string]
+  exportReport: [from: Date, to: Date]
 }>()
 
 const projectName = ref('')
@@ -122,38 +119,16 @@ function submitUser() {
     userError.value = 'Informe uma senha para o novo usuário.'
     return
   }
+  if (userForm.password && userForm.password.length < 12) {
+    userError.value = 'A senha deve ter pelo menos 12 caracteres.'
+    return
+  }
   emit('saveUser', { ...userForm })
   userDialog.value = false
 }
 
 function formatHours(hours: number) {
   return hours.toLocaleString('pt-BR', { maximumFractionDigits: 2 })
-}
-
-function formatTime(date: Date) {
-  const pad = (value: number) => String(value).padStart(2, '0')
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
-}
-
-function escapeXml(value: string) {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&apos;')
-}
-
-function uniqueSheetName(name: string, usedNames: Set<string>) {
-  const base = name.replace(/[\\/?*\[\]:]/g, ' ').trim().slice(0, 31) || 'Usuário'
-  let candidate = base
-  let suffix = 2
-  while (usedNames.has(candidate)) {
-    const ending = ` (${suffix++})`
-    candidate = `${base.slice(0, 31 - ending.length)}${ending}`
-  }
-  usedNames.add(candidate)
-  return candidate
 }
 
 function exportSpreadsheet() {
@@ -183,46 +158,7 @@ function exportSpreadsheet() {
     return
   }
 
-  const header = ['Descrição', 'Projeto', 'Data', 'Inicio', 'Fim']
-    .map((label) => `<Cell ss:StyleID="Header"><Data ss:Type="String">${label}</Data></Cell>`)
-    .join('')
-  const usedNames = new Set<string>()
-  const worksheets = props.users.map((user) => {
-    const rows = (props.exportEntries ?? [])
-      .filter((entry) => entry.userId === user.id)
-      .filter((entry) => {
-        const start = new Date(entry.start)
-        return start >= rangeStart && start <= rangeEnd
-      })
-      .sort((left, right) => new Date(left.start).getTime() - new Date(right.start).getTime())
-      .map((entry) => {
-        const start = new Date(entry.start)
-        const end = new Date(entry.end)
-        const project = props.projects.find((item) => item.id === entry.projectId)
-        const values = [
-          entry.title,
-          project?.name ?? '',
-          formatDate(start),
-          formatTime(start),
-          formatTime(end),
-        ]
-        return `<Row>${values.map((value) => `<Cell><Data ss:Type="String">${escapeXml(value)}</Data></Cell>`).join('')}</Row>`
-      })
-      .join('')
-    const sheetName = uniqueSheetName(user.name, usedNames)
-    return `<Worksheet ss:Name="${escapeXml(sheetName)}"><Table><Column ss:Width="220"/><Column ss:Width="100"/><Column ss:Width="85"/><Column ss:Width="75"/><Column ss:Width="75"/><Row>${header}</Row>${rows}</Table></Worksheet>`
-  }).join('')
-
-  const workbook = `<?xml version="1.0" encoding="UTF-8"?><?mso-application progid="Excel.Sheet"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"><Styles><Style ss:ID="Header"><Font ss:Bold="1"/><Interior ss:Color="#EAF4EF" ss:Pattern="Solid"/></Style></Styles>${worksheets}</Workbook>`
-  const blob = new Blob([workbook], { type: 'application/vnd.ms-excel;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `horasculo-${exportRange.start.replaceAll('/', '-')}-a-${exportRange.end.replaceAll('/', '-')}.xls`
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  URL.revokeObjectURL(url)
+  emit('exportReport', rangeStart, new Date(rangeEnd.getTime() + 1))
   exportDialog.value = false
 }
 </script>
@@ -336,7 +272,7 @@ function exportSpreadsheet() {
         <v-alert v-if="userError" class="mb-4" type="error" variant="tonal" density="compact">{{ userError }}</v-alert>
         <v-text-field v-model="userForm.name" label="Nome" variant="outlined" density="comfortable" />
         <v-text-field v-model="userForm.username" label="Usuário" variant="outlined" density="comfortable" />
-        <v-text-field v-model="userForm.password" :label="userForm.id ? 'Nova senha (opcional)' : 'Senha'" type="password" variant="outlined" density="comfortable" />
+        <v-text-field v-model="userForm.password" :label="userForm.id ? 'Nova senha (opcional)' : 'Senha'" type="password" minlength="12" variant="outlined" density="comfortable" />
         <v-select v-model="userForm.role" :items="[{ title: 'Usuário', value: 'user' }, { title: 'Administrador', value: 'admin' }]" label="Papel" variant="outlined" density="comfortable" />
         <div class="modal-footer"><v-btn variant="text" @click="userDialog = false">Cancelar</v-btn><v-btn class="small-primary-button" @click="submitUser">Salvar</v-btn></div>
       </v-card>

@@ -2,6 +2,7 @@ mod auth;
 mod goals;
 mod health;
 mod projects;
+mod reports;
 mod time_entries;
 mod users;
 
@@ -23,4 +24,6 @@ pub fn router() -> Router<AppState> {
         .route("/me/weekly-goal", get(goals::get).put(goals::put))
         .route("/time-entries", get(time_entries::list).post(time_entries::create))
         .route("/time-entries/{id}", get(time_entries::get).patch(time_entries::update).delete(time_entries::delete))
+        .route("/reports/summary", get(reports::summary))
+        .route("/reports/time-entries.xlsx", get(reports::xlsx))
 }

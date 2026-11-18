@@ -63,7 +63,7 @@ No primeiro boot, a API cria o administrador definido por `BOOTSTRAP_ADMIN_USERN
 
 - Visão geral das horas registradas por projeto.
 - Filtro dos totais por usuário.
-- Exportação dos registros para uma planilha `.xls`.
+- Exportação segura dos registros para uma planilha `.xlsx`, gerada pela API.
 - Seleção do período usado na exportação.
 - Uma aba da planilha para cada usuário.
 
@@ -146,3 +146,42 @@ cargo test --workspace
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
+
+## Produção com HTTPS
+
+O arquivo `compose.prod.yaml` inicia PostgreSQL, API, front-end e Caddy. O Caddy obtém e renova automaticamente o certificado TLS do domínio informado.
+
+Crie um arquivo `.env` no servidor, fora do controle de versão:
+
+```dotenv
+DOMAIN=horas.exemplo.com
+POSTGRES_PASSWORD=uma-senha-longa-e-exclusiva
+BOOTSTRAP_ADMIN_USERNAME=admin
+BOOTSTRAP_ADMIN_PASSWORD=outra-senha-longa-com-pelo-menos-12-caracteres
+BOOTSTRAP_ADMIN_NAME=Administrador
+```
+
+Depois execute:
+
+```bash
+docker compose -f compose.prod.yaml up -d --build
+```
+
+O DNS do domínio deve apontar para o servidor e as portas 80 e 443 devem estar liberadas. O PostgreSQL não é publicado na internet.
+
+### Backup e restauração
+
+Faça diariamente um dump consistente e armazene-o criptografado fora do servidor:
+
+```bash
+docker compose -f compose.prod.yaml exec -T postgres pg_dump -U horasculo -d horasculo -Fc > horasculo.dump
+```
+
+Mantenha pelo menos 7 backups diários e 4 semanais. Teste regularmente a restauração em um banco separado:
+
+```bash
+docker compose -f compose.prod.yaml exec -T postgres createdb -U horasculo horasculo_restore
+docker compose -f compose.prod.yaml exec -T postgres pg_restore -U horasculo -d horasculo_restore --clean --if-exists < horasculo.dump
+```
+
+Antes de atualizar, gere um backup, construa as novas imagens e acompanhe os logs da API enquanto as migrações são aplicadas.

@@ -20,18 +20,26 @@ pub struct EntryUpdate { title: Option<String>, project_id: Option<Uuid>, starts
 #[derive(Deserialize)]
 pub struct ListQuery { from: DateTime<FixedOffset>, to: DateTime<FixedOffset>, project_id: Option<Uuid>, user_id: Option<Uuid> }
 
+const MAX_QUERY_DAYS: i64 = 366;
+
 fn title(value: &str) -> Result<String, AppError> { let v=value.trim(); if v.is_empty(){Err(AppError::Validation("título é obrigatório".into()))}else{Ok(v.to_owned())} }
 fn validate_range(start: DateTime<Utc>, end: DateTime<Utc>) -> Result<(), AppError> {
     if start.second()!=0 || start.nanosecond()!=0 || end.second()!=0 || end.nanosecond()!=0 || start.minute()%15!=0 || end.minute()%15!=0 { return Err(AppError::Validation("horários devem usar intervalos de 15 minutos".into())); }
     let duration=end-start; if duration.num_minutes()<=0 || duration.num_hours()>24 || duration.num_minutes()>1440 { return Err(AppError::Validation("o período deve ser maior que zero e ter no máximo 24 horas".into())); } Ok(())
 }
+fn validate_query_range(start: DateTime<Utc>, end: DateTime<Utc>) -> Result<(), AppError> {
+    if end <= start || end - start > chrono::Duration::days(MAX_QUERY_DAYS) {
+        return Err(AppError::Validation("o período de consulta deve ter no máximo 366 dias".into()));
+    }
+    Ok(())
+}
 async fn active_project(state:&AppState,id:Uuid)->Result<(),AppError>{if !sqlx::query_scalar::<_,bool>("SELECT EXISTS(SELECT 1 FROM projects WHERE id=$1 AND active=true)").bind(id).fetch_one(&state.db).await?{Err(AppError::Validation("projeto inválido ou arquivado".into()))}else{Ok(())}}
 const SELECT_ENTRY: &str = "SELECT id,user_id,project_id,title,starts_at,ends_at,created_at,updated_at FROM time_entries";
 
 pub async fn list(State(state):State<AppState>,user:CurrentUser,Query(query):Query<ListQuery>)->Result<Json<Vec<EntryResponse>>,AppError>{
-    let from=query.from.with_timezone(&Utc);let to=query.to.with_timezone(&Utc);if to<=from{return Err(AppError::Validation("intervalo de consulta inválido".into()));}
+    let from=query.from.with_timezone(&Utc);let to=query.to.with_timezone(&Utc);validate_query_range(from,to)?;
     let requested_user=if user.role=="admin"{query.user_id}else{Some(user.id)};
-    let rows=sqlx::query_as::<_,EntryRow>(&format!("{SELECT_ENTRY} WHERE starts_at >= $1 AND starts_at < $2 AND ($3::uuid IS NULL OR project_id=$3) AND ($4::uuid IS NULL OR user_id=$4) ORDER BY starts_at"))
+    let rows=sqlx::query_as::<_,EntryRow>(&format!("{SELECT_ENTRY} WHERE starts_at < $2 AND ends_at > $1 AND ($3::uuid IS NULL OR project_id=$3) AND ($4::uuid IS NULL OR user_id=$4) ORDER BY starts_at"))
         .bind(from).bind(to).bind(query.project_id).bind(requested_user).fetch_all(&state.db).await?;
     Ok(Json(rows.into_iter().map(Into::into).collect()))
 }

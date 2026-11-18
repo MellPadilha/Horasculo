@@ -1,0 +1,61 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: horasculo
+      POSTGRES_USER: horasculo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD}
+    volumes:
+      - horasculo-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U horasculo -d horasculo"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      API_HOST: 0.0.0.0
+      API_PORT: 3000
+      APP_ENV: production
+      DATABASE_URL: postgres://horasculo:${POSTGRES_PASSWORD}@postgres:5432/horasculo
+      SESSION_DAYS: ${SESSION_DAYS:-7}
+      ALLOWED_ORIGIN: https://${DOMAIN:?defina DOMAIN}
+      BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-Administrador}
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:?defina BOOTSTRAP_ADMIN_USERNAME}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?defina BOOTSTRAP_ADMIN_PASSWORD}
+      RUST_LOG: horasculo_api=info,tower_http=info
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [api, web]
+    environment:
+      DOMAIN: ${DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  horasculo-postgres:
+  caddy-data:
+  caddy-config:

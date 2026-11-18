@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import FullCalendar from '@fullcalendar/vue3'
 import timeGridPlugin from '@fullcalendar/timegrid'
 import interactionPlugin from '@fullcalendar/interaction'
 import ptBrLocale from '@fullcalendar/core/locales/pt-br'
 import type { CalendarApi, CalendarOptions, DateSelectArg, DatesSetArg, EventInput } from '@fullcalendar/core'
 import SettingsView from './components/SettingsView.vue'
-import { api, type Project, type TimeEntry, type User, type UserInput } from './services/api'
+import { api, type Project, type SummaryEntry, type TimeEntry, type User, type UserInput } from './services/api'
 
 const projects = ref<Project[]>([])
 
@@ -41,7 +41,7 @@ const weeklyGoal = ref(40)
 const initializing = ref(true)
 const currentPage = ref<'calendar' | 'settings'>('calendar')
 const users = ref<User[]>([])
-const adminEntries = ref<TimeEntry[]>([])
+const adminSummary = ref<SummaryEntry[]>([])
 const loadingUsers = ref(false)
 const settingsError = ref('')
 const loginLoading = ref(false)
@@ -49,6 +49,7 @@ const loginError = ref('')
 const loginForm = reactive({ username: '', password: '' })
 
 const events = ref<EventInput[]>([])
+let entriesRequest = 0
 
 const calendarRef = ref<{ getApi: () => CalendarApi } | null>(null)
 const activeProject = ref('all')
@@ -118,7 +119,9 @@ function toCalendarEvent(entry: TimeEntry): EventInput {
 
 async function loadEntries(from = visibleRangeStart.value, to = visibleRangeEnd.value) {
   if (!currentUser.value) return
-  events.value = (await api.listEntries(from, to, { userId: currentUser.value.id })).map(toCalendarEvent)
+  const request = ++entriesRequest
+  const loaded = await api.listEntries(from, to, { userId: currentUser.value.id })
+  if (request === entriesRequest) events.value = loaded.map(toCalendarEvent)
 }
 
 async function loadWorkspace() {
@@ -129,7 +132,15 @@ async function loadWorkspace() {
   await loadEntries()
 }
 
+const handleUnauthorized = () => {
+  currentUser.value = null
+  events.value = []
+  currentPage.value = 'calendar'
+  loginError.value = 'Sua sessão expirou. Entre novamente.'
+}
+
 onMounted(async () => {
+  window.addEventListener('horasculo:unauthorized', handleUnauthorized)
   try {
     currentUser.value = await api.me()
     await loadWorkspace()
@@ -140,6 +151,7 @@ onMounted(async () => {
     initializing.value = false
   }
 })
+onBeforeUnmount(() => window.removeEventListener('horasculo:unauthorized', handleUnauthorized))
 
 async function submitLogin() {
   loginError.value = ''
@@ -177,9 +189,10 @@ async function openSettings() {
   loadingUsers.value = true
   try {
     users.value = currentUser.value?.role === 'admin' ? await api.listUsers() : currentUser.value ? [currentUser.value] : []
-    adminEntries.value = currentUser.value?.role === 'admin'
-      ? await api.listEntries(new Date('1970-01-01T00:00:00Z'), new Date('2100-01-01T00:00:00Z'))
-      : []
+    const now = new Date()
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+    adminSummary.value = currentUser.value?.role === 'admin' ? await api.reportSummary(monthStart, monthEnd) : []
   } catch (error) {
     settingsError.value = error instanceof Error ? error.message : 'Não foi possível carregar as configurações.'
   } finally {
@@ -199,6 +212,7 @@ async function updateWeeklyGoal(goal: number) {
 }
 
 async function deleteProject(projectId: string) {
+  if (!window.confirm('Arquivar este projeto? Os registros existentes serão preservados.')) return
   try {
     await api.deleteProject(projectId)
     projects.value = projects.value.filter((project) => project.id !== projectId)
@@ -227,6 +241,7 @@ async function saveUser(input: UserInput) {
 
 async function deleteUser(userId: string) {
   if (userId === currentUser.value?.id) return
+  if (!window.confirm('Arquivar este usuário? O histórico de horas será preservado.')) return
   settingsError.value = ''
   try {
     await api.deleteUser(userId)
@@ -236,9 +251,19 @@ async function deleteUser(userId: string) {
   }
 }
 
-const dashboardEntries = computed(() => adminEntries.value.map((entry) => ({ userId: entry.user_id, projectId: entry.project_id, hours: entry.hours })))
+const dashboardEntries = computed(() => adminSummary.value.map((entry) => ({ userId: entry.user_id, projectId: entry.project_id, hours: entry.hours })))
 
-const exportEntries = computed(() => adminEntries.value.map((entry) => ({ userId: entry.user_id, title: entry.title, projectId: entry.project_id, start: entry.starts_at, end: entry.ends_at })))
+async function exportReport(from: Date, to: Date) {
+  settingsError.value = ''
+  try {
+    const blob = await api.downloadReport(from, to)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `horasculo-${from.toLocaleDateString('pt-BR').replaceAll('/', '-')}-a-${new Date(to.getTime() - 1).toLocaleDateString('pt-BR').replaceAll('/', '-')}.xlsx`
+    document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url)
+  } catch (error) { settingsError.value = error instanceof Error ? error.message : 'Não foi possível exportar os registros.' }
+}
 
 const visibleWeekEventCount = computed(() => {
   return visibleEvents.value.filter((event) => {
@@ -370,6 +395,7 @@ async function saveEvent() {
 
 async function removeEvent() {
   if (editingEventId.value) {
+    if (!window.confirm('Excluir definitivamente este registro de horas?')) return
     try {
       await api.deleteEntry(editingEventId.value)
       events.value = events.value.filter((event) => event.id !== editingEventId.value)
@@ -526,7 +552,6 @@ function openBlankEvent() {
         :projects="projects"
         :users="users"
         :hours-entries="dashboardEntries"
-        :export-entries="exportEntries"
         :current-user-id="currentUser.id"
         :loading-users="loadingUsers"
         :error-message="settingsError"
@@ -537,6 +562,7 @@ function openBlankEvent() {
         @update-weekly-goal="updateWeeklyGoal"
         @save-user="saveUser"
         @delete-user="deleteUser"
+        @export-report="exportReport"
       />
     </div>
 
