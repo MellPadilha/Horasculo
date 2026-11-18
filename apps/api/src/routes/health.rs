@@ -10,7 +10,9 @@ pub struct HealthResponse {
 }
 
 pub async fn ready(State(state): State<AppState>) -> Result<Json<HealthResponse>, AppError> {
-    sqlx::query_scalar::<_, i32>("SELECT 1").fetch_one(&state.db).await?;
+    sqlx::query_scalar::<_, i32>("SELECT 1")
+        .fetch_one(&state.db)
+        .await?;
     Ok(check(State(state)).await)
 }
 
@@ -27,7 +29,10 @@ mod tests {
 
     #[tokio::test]
     async fn health_check_returns_ok() {
-        let response = HealthResponse { status: "ok", uptime_seconds: 0 };
+        let response = HealthResponse {
+            status: "ok",
+            uptime_seconds: 0,
+        };
         assert_eq!(response.status, "ok");
     }
 }

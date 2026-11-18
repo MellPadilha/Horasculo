@@ -1,5 +1,7 @@
 .git
 .env
+secrets
+infra
 node_modules
 target
 apps/web/dist

@@ -6,7 +6,7 @@ import interactionPlugin from '@fullcalendar/interaction'
 import ptBrLocale from '@fullcalendar/core/locales/pt-br'
 import type { CalendarApi, CalendarOptions, DateSelectArg, DatesSetArg, EventInput } from '@fullcalendar/core'
 import SettingsView from './components/SettingsView.vue'
-import { api, type Project, type SummaryEntry, type TimeEntry, type User, type UserInput } from './services/api'
+import { api, type Project, type SummaryEntry, type TimeEntry, type User } from './services/api'
 
 const projects = ref<Project[]>([])
 
@@ -44,9 +44,7 @@ const users = ref<User[]>([])
 const adminSummary = ref<SummaryEntry[]>([])
 const loadingUsers = ref(false)
 const settingsError = ref('')
-const loginLoading = ref(false)
 const loginError = ref('')
-const loginForm = reactive({ username: '', password: '' })
 
 const events = ref<EventInput[]>([])
 let entriesRequest = 0
@@ -153,32 +151,19 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => window.removeEventListener('horasculo:unauthorized', handleUnauthorized))
 
-async function submitLogin() {
-  loginError.value = ''
-  if (!loginForm.username.trim() || !loginForm.password) {
-    loginError.value = 'Informe usuário e senha.'
-    return
-  }
-
-  loginLoading.value = true
-  try {
-    const user = await api.login(loginForm.username, loginForm.password)
-    currentUser.value = user
-    await loadWorkspace()
-    loginForm.password = ''
-  } catch (error) {
-    loginError.value = error instanceof Error ? error.message : 'Não foi possível entrar.'
-  } finally {
-    loginLoading.value = false
-  }
+function submitLogin() {
+  window.location.assign('/api/auth/start')
 }
 
 async function logout() {
-  try { await api.logout() } catch { /* Encerra o estado local mesmo se a rede falhar. */ }
+  try {
+    await api.logout()
+  } catch {
+    window.alert('Não foi possível encerrar a sessão. Tente novamente.')
+    return
+  }
   currentUser.value = null
   events.value = []
-  loginForm.username = ''
-  loginForm.password = ''
   loginError.value = ''
   currentPage.value = 'calendar'
 }
@@ -220,34 +205,13 @@ async function deleteProject(projectId: string) {
   } catch (error) { settingsError.value = error instanceof Error ? error.message : 'Não foi possível arquivar o projeto.' }
 }
 
-async function saveUser(input: UserInput) {
+async function revokeUserSessions(userId: string) {
+  if (!window.confirm('Encerrar todas as sessões deste usuário?')) return
   settingsError.value = ''
   try {
-    const savedUser = await api.saveUser(input)
-    if (currentUser.value?.id === savedUser.id) {
-      currentUser.value = savedUser
-      if (input.password) {
-        currentUser.value = null
-        events.value = []
-        currentPage.value = 'calendar'
-        return
-      }
-    }
-    users.value = await api.listUsers()
-  } catch (error) {
-    settingsError.value = error instanceof Error ? error.message : 'Não foi possível salvar o usuário.'
-  }
-}
-
-async function deleteUser(userId: string) {
-  if (userId === currentUser.value?.id) return
-  if (!window.confirm('Arquivar este usuário? O histórico de horas será preservado.')) return
-  settingsError.value = ''
-  try {
-    await api.deleteUser(userId)
-    users.value = await api.listUsers()
+    await api.revokeUserSessions(userId)
   } catch {
-    settingsError.value = 'Não foi possível excluir o usuário.'
+    settingsError.value = 'Não foi possível revogar as sessões.'
   }
 }
 
@@ -438,9 +402,7 @@ function openBlankEvent() {
         <p class="login-subtitle">Entre para registrar e acompanhar suas horas.</p>
         <form class="login-form" @submit.prevent="submitLogin">
           <v-alert v-if="loginError" type="error" variant="tonal" density="compact">{{ loginError }}</v-alert>
-          <v-text-field v-model="loginForm.username" label="Usuário" autocomplete="username" variant="outlined" density="comfortable" autofocus />
-          <v-text-field v-model="loginForm.password" label="Senha" type="password" autocomplete="current-password" variant="outlined" density="comfortable" />
-          <v-btn class="login-button" type="submit" block :loading="loginLoading">Entrar</v-btn>
+          <v-btn class="login-button" type="submit" block>Entrar com Microsoft</v-btn>
         </form>
       </v-card>
     </main>
@@ -505,7 +467,7 @@ function openBlankEvent() {
           </div>
           <div class="profile-row">
             <div class="profile-avatar">{{ currentUser.name.charAt(0).toLocaleUpperCase('pt-BR') }}</div>
-            <div class="profile-copy"><strong>{{ currentUser.name }}</strong><span>@{{ currentUser.username }}</span></div>
+            <div class="profile-copy"><strong>{{ currentUser.name }}</strong><span>{{ currentUser.username }}</span></div>
             <v-btn icon="mdi-logout" variant="text" size="small" aria-label="Sair" title="Sair" @click="logout" />
           </div>
         </div>
@@ -560,8 +522,7 @@ function openBlankEvent() {
         @add-project="addProject"
         @delete-project="deleteProject"
         @update-weekly-goal="updateWeeklyGoal"
-        @save-user="saveUser"
-        @delete-user="deleteUser"
+        @revoke-user-sessions="revokeUserSessions"
         @export-report="exportReport"
       />
     </div>

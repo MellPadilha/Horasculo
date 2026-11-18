@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import type { User, UserInput } from '../services/api'
+import type { User } from '../services/api'
 
 type Project = { id: string; name: string; color: string; tint: string }
 type HoursEntry = { userId: string; projectId: string; hours: number }
@@ -20,8 +20,7 @@ const emit = defineEmits<{
   addProject: [project: Project]
   deleteProject: [projectId: string]
   updateWeeklyGoal: [goal: number]
-  saveUser: [user: UserInput]
-  deleteUser: [userId: string]
+  revokeUserSessions: [userId: string]
   exportReport: [from: Date, to: Date]
 }>()
 
@@ -40,13 +39,10 @@ const projectPalette = [
 const projectColor = ref(projectPalette[2].color)
 const selectedUser = ref('all')
 const projectDialog = ref(false)
-const userDialog = ref(false)
 const exportDialog = ref(false)
 const projectError = ref('')
 const weeklyGoalError = ref('')
 const exportError = ref('')
-const userError = ref('')
-const userForm = reactive<UserInput>({ name: '', username: '', password: '', role: 'user' })
 const today = new Date()
 const formatDate = (date: Date) => new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(date)
 const firstDay = new Date(today.getFullYear(), today.getMonth(), 1)
@@ -95,36 +91,6 @@ function saveWeeklyGoal() {
     return
   }
   emit('updateWeeklyGoal', goal)
-}
-
-function openNewUser() {
-  Object.assign(userForm, { id: undefined, name: '', username: '', password: '', role: 'user' })
-  userError.value = ''
-  userDialog.value = true
-}
-
-function openEditUser(user: User) {
-  Object.assign(userForm, { id: user.id, name: user.name, username: user.username, password: '', role: user.role })
-  userError.value = ''
-  userDialog.value = true
-}
-
-function submitUser() {
-  userError.value = ''
-  if (!userForm.name.trim() || !userForm.username.trim()) {
-    userError.value = 'Informe nome e usuário.'
-    return
-  }
-  if (!userForm.id && !userForm.password) {
-    userError.value = 'Informe uma senha para o novo usuário.'
-    return
-  }
-  if (userForm.password && userForm.password.length < 12) {
-    userError.value = 'A senha deve ter pelo menos 12 caracteres.'
-    return
-  }
-  emit('saveUser', { ...userForm })
-  userDialog.value = false
 }
 
 function formatHours(hours: number) {
@@ -219,17 +185,16 @@ function exportSpreadsheet() {
       </section>
 
       <section class="settings-card">
-        <div class="settings-card-heading"><div><span class="eyebrow">ACESSOS</span><h2>Usuários</h2></div><v-btn class="small-primary-button" prepend-icon="mdi-plus" @click="openNewUser">Adicionar</v-btn></div>
+        <div class="settings-card-heading"><div><span class="eyebrow">ACESSOS</span><h2>Usuários</h2></div><span>Gerencie acessos no Microsoft Entra ID</span></div>
         <v-progress-linear v-if="loadingUsers" indeterminate color="#d96446" />
         <v-table class="settings-table" density="compact">
           <thead><tr><th>Nome</th><th>Usuário</th><th class="table-actions">Ações</th></tr></thead>
           <tbody>
             <tr v-for="user in users" :key="user.id">
               <td>{{ user.name }} <span v-if="user.id === currentUserId" class="you-badge">Você</span></td>
-              <td>@{{ user.username }}</td>
+              <td>{{ user.username }}</td>
               <td class="table-actions">
-                <v-btn icon="mdi-pencil-outline" variant="text" size="small" :aria-label="`Editar ${user.name}`" @click="openEditUser(user)" />
-                <v-btn icon="mdi-trash-can-outline" variant="text" size="small" color="error" :disabled="user.id === currentUserId" :aria-label="`Excluir ${user.name}`" @click="emit('deleteUser', user.id)" />
+                <v-btn icon="mdi-logout" variant="text" size="small" :aria-label="`Revogar sessões de ${user.name}`" @click="emit('revokeUserSessions', user.id)" />
               </td>
             </tr>
           </tbody>
@@ -263,18 +228,6 @@ function exportSpreadsheet() {
           </fieldset>
           <div class="modal-footer"><v-btn variant="text" @click="projectDialog = false">Cancelar</v-btn><v-btn class="small-primary-button" type="submit">Adicionar projeto</v-btn></div>
         </form>
-      </v-card>
-    </v-dialog>
-
-    <v-dialog v-model="userDialog" max-width="480">
-      <v-card class="event-dialog">
-        <div class="dialog-heading"><div><div class="eyebrow">USUÁRIO</div><h2>{{ userForm.id ? 'Editar usuário' : 'Adicionar usuário' }}</h2></div><v-btn icon="mdi-close" variant="text" @click="userDialog = false" /></div>
-        <v-alert v-if="userError" class="mb-4" type="error" variant="tonal" density="compact">{{ userError }}</v-alert>
-        <v-text-field v-model="userForm.name" label="Nome" variant="outlined" density="comfortable" />
-        <v-text-field v-model="userForm.username" label="Usuário" variant="outlined" density="comfortable" />
-        <v-text-field v-model="userForm.password" :label="userForm.id ? 'Nova senha (opcional)' : 'Senha'" type="password" minlength="12" variant="outlined" density="comfortable" />
-        <v-select v-model="userForm.role" :items="[{ title: 'Usuário', value: 'user' }, { title: 'Administrador', value: 'admin' }]" label="Papel" variant="outlined" density="comfortable" />
-        <div class="modal-footer"><v-btn variant="text" @click="userDialog = false">Cancelar</v-btn><v-btn class="small-primary-button" @click="submitUser">Salvar</v-btn></div>
       </v-card>
     </v-dialog>
 

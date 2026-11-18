@@ -14,11 +14,11 @@ apps/
 └── web/    # front-end Vue 3
 ```
 
-O front consome a API Rust, que persiste usuários, projetos, metas e registros no PostgreSQL. A autenticação usa uma sessão em cookie `HttpOnly`.
+O front consome a API Rust, que persiste usuários, projetos, metas e registros no PostgreSQL. O login usa Microsoft Entra ID; a API mantém uma sessão em cookie `HttpOnly`.
 
 ## Primeiro acesso
 
-No primeiro boot, a API cria o administrador definido por `BOOTSTRAP_ADMIN_USERNAME` e `BOOTSTRAP_ADMIN_PASSWORD`. Use uma senha exclusiva com pelo menos 12 caracteres.
+No Entra ID, atribua diretamente cada pessoa autorizada ao papel de aplicativo `Horasculo.User`. Atribua o grupo administrativo ao papel `Horasculo.Admin`. A API exige `Horasculo.User` mesmo para membros desse grupo. Usuários são criados no banco no primeiro login autorizado.
 
 ## Funcionalidades implementadas
 
@@ -54,9 +54,8 @@ No primeiro boot, a API cria o administrador definido por `BOOTSTRAP_ADMIN_USERN
 
 ### Usuários
 
-- Login e logout com sessão segura em cookie `HttpOnly`.
-- Cadastro, edição e exclusão de usuários.
-- Proteção contra a exclusão do usuário atualmente conectado.
+- Login corporativo por OpenID Connect e logout local.
+- Contas e papéis administrados no Entra ID; revogação de sessões pelo administrador.
 - Registros de calendário separados por usuário.
 
 ### Relatórios e configurações
@@ -115,6 +114,17 @@ Requisitos: Rust, Cargo e Docker instalados. Na raiz do repositório:
 docker compose up -d postgres
 cp apps/api/.env.example apps/api/.env
 set -a; source apps/api/.env; set +a
+```
+
+Antes de iniciar a API pela primeira vez, aplique as migrações com a credencial de migração:
+
+```bash
+cargo run -p horasculo-api -- migrate
+```
+
+Depois inicie normalmente:
+
+```bash
 cargo run -p horasculo-api
 ```
 
@@ -125,7 +135,7 @@ GET /api/health
 GET /api/ready
 ```
 
-As variáveis disponíveis estão documentadas em `apps/api/.env.example`. Elas podem ser definidas no ambiente antes de iniciar a API.
+Preencha `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID` e `ENTRA_CLIENT_SECRET` no ambiente local. Registre `http://localhost:5173/api/auth/callback` como URI de retorno do tipo Web no Entra. O arquivo `apps/api/.env.example` contém as demais variáveis.
 
 ## Compilação de produção
 
@@ -149,39 +159,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ## Produção com HTTPS
 
-O arquivo `compose.prod.yaml` inicia PostgreSQL, API, front-end e Caddy. O Caddy obtém e renova automaticamente o certificado TLS do domínio informado.
-
-Crie um arquivo `.env` no servidor, fora do controle de versão:
-
-```dotenv
-DOMAIN=horas.exemplo.com
-POSTGRES_PASSWORD=uma-senha-longa-e-exclusiva
-BOOTSTRAP_ADMIN_USERNAME=admin
-BOOTSTRAP_ADMIN_PASSWORD=outra-senha-longa-com-pelo-menos-12-caracteres
-BOOTSTRAP_ADMIN_NAME=Administrador
-```
-
-Depois execute:
-
-```bash
-docker compose -f compose.prod.yaml up -d --build
-```
-
-O DNS do domínio deve apontar para o servidor e as portas 80 e 443 devem estar liberadas. O PostgreSQL não é publicado na internet.
+O Terraform em [infra/README.md](infra/README.md) provisiona a VM, DNS, segredos, logs e backups na AWS. O `compose.prod.yaml` inicia PostgreSQL, migrações, API, front-end e Caddy; só o Caddy publica portas. Os valores dos segredos são carregados em arquivos temporários no servidor por `ops/deploy.sh`. O Caddy obtém e renova o certificado TLS.
 
 ### Backup e restauração
 
-Faça diariamente um dump consistente e armazene-o criptografado fora do servidor:
-
-```bash
-docker compose -f compose.prod.yaml exec -T postgres pg_dump -U horasculo -d horasculo -Fc > horasculo.dump
-```
-
-Mantenha pelo menos 7 backups diários e 4 semanais. Teste regularmente a restauração em um banco separado:
-
-```bash
-docker compose -f compose.prod.yaml exec -T postgres createdb -U horasculo horasculo_restore
-docker compose -f compose.prod.yaml exec -T postgres pg_restore -U horasculo -d horasculo_restore --clean --if-exists < horasculo.dump
-```
-
-Antes de atualizar, gere um backup, construa as novas imagens e acompanhe os logs da API enquanto as migrações são aplicadas.
+O timer `horasculo-backup.timer` envia um dump diário criptografado ao S3 e mantém cópias semanais. O timer `horasculo-restore-check.timer` testa mensalmente a restauração em um contêiner isolado. O CloudWatch alerta quando o backup diário falha ou deixa de acontecer. Registros de horas não são excluídos automaticamente; a empresa deve definir sua política de retenção.

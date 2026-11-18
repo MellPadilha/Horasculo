@@ -13,6 +13,12 @@ dist-ssr
 *.local
 target
 .env
+secrets/
+*.tfstate
+*.tfstate.*
+.terraform/
+*.tfplan
+*.tfvars
 
 # Editor directories and files
 .vscode/*

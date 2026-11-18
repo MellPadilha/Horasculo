@@ -1,0 +1,8 @@
+[Unit]
+Description=Teste mensal de restauração do Horasculo
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/horasculo/ops/restore-check.sh

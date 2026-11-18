@@ -1,5 +1,4 @@
 export type User = { id: string; username: string; name: string; role: 'admin' | 'user' }
-export type UserInput = { id?: string; username: string; name: string; password?: string; role?: 'admin' | 'user' }
 export type Project = { id: string; name: string; color: string; tint: string }
 export type TimeEntry = {
   id: string
@@ -33,23 +32,27 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export const api = {
   me: () => request<User>('/auth/me'),
-  login: (username: string, password: string) => request<User>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
   logout: () => request<void>('/auth/logout', { method: 'POST' }),
   listUsers: () => request<User[]>('/users'),
-  saveUser: (input: UserInput) => input.id
-    ? request<User>(`/users/${input.id}`, { method: 'PATCH', body: JSON.stringify(input) })
-    : request<User>('/users', { method: 'POST', body: JSON.stringify(input) }),
-  deleteUser: (id: string) => request<void>(`/users/${id}`, { method: 'DELETE' }),
+  revokeUserSessions: (id: string) => request<void>(`/users/${id}/sessions`, { method: 'DELETE' }),
   listProjects: () => request<Project[]>('/projects'),
   createProject: (input: Omit<Project, 'id'>) => request<Project>('/projects', { method: 'POST', body: JSON.stringify(input) }),
   deleteProject: (id: string) => request<void>(`/projects/${id}`, { method: 'DELETE' }),
   getWeeklyGoal: () => request<{ hours: number }>('/me/weekly-goal'),
   setWeeklyGoal: (hours: number) => request<{ hours: number }>('/me/weekly-goal', { method: 'PUT', body: JSON.stringify({ hours }) }),
-  listEntries: (from: Date, to: Date, filters: { projectId?: string; userId?: string } = {}) => {
+  listEntries: async (from: Date, to: Date, filters: { projectId?: string; userId?: string } = {}) => {
     const params = new URLSearchParams({ from: from.toISOString(), to: to.toISOString() })
     if (filters.projectId) params.set('project_id', filters.projectId)
     if (filters.userId) params.set('user_id', filters.userId)
-    return request<TimeEntry[]>(`/time-entries?${params}`)
+    const entries: TimeEntry[] = []
+    for (let offset = 0; offset <= 10_000; offset += 200) {
+      params.set('limit', '200')
+      params.set('offset', String(offset))
+      const page = await request<TimeEntry[]>(`/time-entries?${params}`)
+      entries.push(...page)
+      if (page.length < 200) return entries
+    }
+    throw new Error('Há muitos registros neste período. Reduza o intervalo.')
   },
   createEntry: (input: { title: string; project_id: string; user_id?: string; starts_at: string; ends_at: string }) => request<TimeEntry>('/time-entries', { method: 'POST', body: JSON.stringify(input) }),
   updateEntry: (id: string, input: Partial<{ title: string; project_id: string; starts_at: string; ends_at: string }>) => request<TimeEntry>(`/time-entries/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
