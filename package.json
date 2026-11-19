@@ -8,6 +8,6 @@
   "scripts": {
     "dev:web": "npm run dev --workspace @horasculo/web",
     "build:web": "npm run build --workspace @horasculo/web",
-    "preview:web": "npm run preview --workspace @horasculo/web"
+    "preview:web": "npm run build:web && npm run preview --workspace @horasculo/web"
   }
 }

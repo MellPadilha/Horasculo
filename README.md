@@ -62,6 +62,7 @@ No Entra ID, atribua diretamente cada pessoa autorizada ao papel de aplicativo `
 
 - Visão geral das horas registradas por projeto.
 - Filtro dos totais por usuário.
+- Filtro dos totais por intervalo de datas, incluindo o dia inicial e o final.
 - Exportação segura dos registros para uma planilha `.xlsx`, gerada pela API.
 - Seleção do período usado na exportação.
 - Uma aba da planilha para cada usuário.
@@ -97,9 +98,10 @@ Os arquivos usados pela aplicação estão em:
 
 ### Front-end
 
-Requisitos: Node.js e npm instalados. Na raiz do repositório:
+Requisitos: Node.js na versão indicada em `.nvmrc` e npm instalados. Na raiz do repositório:
 
 ```bash
+nvm use
 npm install
 npm run dev:web
 ```
@@ -148,6 +150,8 @@ Para visualizar localmente o resultado compilado:
 ```bash
 npm run preview:web
 ```
+
+Esse comando recompila o frontend normalmente e abre o preview em `http://localhost:5173`. Inicie a API antes de acessar a aplicação; o login usa o Microsoft Entra ID e os dados vêm do PostgreSQL. O endereço coincide com `ALLOWED_ORIGIN` e com a URI de retorno indicados acima.
 
 Para verificar o backend:
 

@@ -42,6 +42,13 @@ const initializing = ref(true)
 const currentPage = ref<'calendar' | 'settings'>('calendar')
 const users = ref<User[]>([])
 const adminSummary = ref<SummaryEntry[]>([])
+const summaryNow = new Date()
+const summaryRange = reactive({
+  from: new Date(summaryNow.getFullYear(), summaryNow.getMonth(), 1),
+  to: new Date(summaryNow.getFullYear(), summaryNow.getMonth() + 1, 1),
+})
+const loadingSummary = ref(false)
+let summaryRequest = 0
 const loadingUsers = ref(false)
 const settingsError = ref('')
 const loginError = ref('')
@@ -168,16 +175,37 @@ async function logout() {
   currentPage.value = 'calendar'
 }
 
+async function loadSummary(from: Date, to: Date) {
+  const request = ++summaryRequest
+  loadingSummary.value = true
+  try {
+    const loaded = await api.reportSummary(from, to)
+    if (request === summaryRequest) adminSummary.value = loaded
+  } catch (error) {
+    if (request === summaryRequest) {
+      adminSummary.value = []
+      settingsError.value = error instanceof Error ? error.message : 'Não foi possível carregar o resumo de horas.'
+    }
+  } finally {
+    if (request === summaryRequest) loadingSummary.value = false
+  }
+}
+
+async function updateSummaryRange(from: Date, to: Date) {
+  summaryRange.from = from
+  summaryRange.to = to
+  settingsError.value = ''
+  await loadSummary(from, to)
+}
+
 async function openSettings() {
   currentPage.value = 'settings'
   settingsError.value = ''
   loadingUsers.value = true
   try {
     users.value = currentUser.value?.role === 'admin' ? await api.listUsers() : currentUser.value ? [currentUser.value] : []
-    const now = new Date()
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1)
-    adminSummary.value = currentUser.value?.role === 'admin' ? await api.reportSummary(monthStart, monthEnd) : []
+    if (currentUser.value?.role === 'admin') await loadSummary(summaryRange.from, summaryRange.to)
+    else adminSummary.value = []
   } catch (error) {
     settingsError.value = error instanceof Error ? error.message : 'Não foi possível carregar as configurações.'
   } finally {
@@ -514,6 +542,9 @@ function openBlankEvent() {
         :projects="projects"
         :users="users"
         :hours-entries="dashboardEntries"
+        :summary-from="summaryRange.from"
+        :summary-to="summaryRange.to"
+        :loading-summary="loadingSummary"
         :current-user-id="currentUser.id"
         :loading-users="loadingUsers"
         :error-message="settingsError"
@@ -524,6 +555,7 @@ function openBlankEvent() {
         @update-weekly-goal="updateWeeklyGoal"
         @revoke-user-sessions="revokeUserSessions"
         @export-report="exportReport"
+        @update-summary-range="updateSummaryRange"
       />
     </div>
 

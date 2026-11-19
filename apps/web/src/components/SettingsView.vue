@@ -9,6 +9,9 @@ const props = defineProps<{
   projects: Project[]
   users: User[]
   hoursEntries: HoursEntry[]
+  summaryFrom: Date
+  summaryTo: Date
+  loadingSummary: boolean
   currentUserId: string
   loadingUsers: boolean
   errorMessage: string
@@ -22,6 +25,7 @@ const emit = defineEmits<{
   updateWeeklyGoal: [goal: number]
   revokeUserSessions: [userId: string]
   exportReport: [from: Date, to: Date]
+  updateSummaryRange: [from: Date, to: Date]
 }>()
 
 const projectName = ref('')
@@ -43,10 +47,11 @@ const exportDialog = ref(false)
 const projectError = ref('')
 const weeklyGoalError = ref('')
 const exportError = ref('')
+const dashboardError = ref('')
 const today = new Date()
-const formatDate = (date: Date) => new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(date)
 const firstDay = new Date(today.getFullYear(), today.getMonth(), 1)
-const exportRange = reactive({ start: formatDate(firstDay), end: formatDate(today) })
+const exportRange = reactive<{ start: Date | null; end: Date | null }>({ start: firstDay, end: today })
+const dashboardRange = reactive<{ start: Date | null; end: Date | null }>({ start: props.summaryFrom, end: new Date(props.summaryTo.getTime() - 1) })
 
 const dashboardRows = computed(() => props.projects.map((project) => ({
   ...project,
@@ -97,34 +102,52 @@ function formatHours(hours: number) {
   return hours.toLocaleString('pt-BR', { maximumFractionDigits: 2 })
 }
 
+function validDate(value: Date | null): value is Date {
+  return value instanceof Date && !Number.isNaN(value.getTime())
+}
+
+function startOfDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate())
+}
+
+function nextDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1)
+}
+
+function updateDashboardRange() {
+  dashboardError.value = ''
+  if (!validDate(dashboardRange.start) || !validDate(dashboardRange.end)) {
+    dashboardError.value = 'Selecione a data inicial e a data final.'
+    return
+  }
+  const from = startOfDay(dashboardRange.start)
+  const to = nextDay(dashboardRange.end)
+  if (to <= from) {
+    dashboardError.value = 'A data final deve ser igual ou posterior à inicial.'
+    return
+  }
+  if (to.getTime() - from.getTime() > 366 * 24 * 60 * 60 * 1000) {
+    dashboardError.value = 'Selecione um período de até 366 dias.'
+    return
+  }
+  emit('updateSummaryRange', from, to)
+}
+
 function exportSpreadsheet() {
   exportError.value = ''
-  if (!exportRange.start || !exportRange.end) {
+  if (!validDate(exportRange.start) || !validDate(exportRange.end)) {
     exportError.value = 'Selecione a data inicial e a data final.'
     return
   }
 
-  const parseDate = (value: string, endOfDay = false) => {
-    const match = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
-    if (!match) return new Date(Number.NaN)
-    const [, day, month, year] = match.map(Number)
-    const date = new Date(year, month - 1, day, endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0, endOfDay ? 999 : 0)
-    return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day
-      ? date
-      : new Date(Number.NaN)
-  }
-  const rangeStart = parseDate(exportRange.start)
-  const rangeEnd = parseDate(exportRange.end, true)
-  if (Number.isNaN(rangeStart.getTime()) || Number.isNaN(rangeEnd.getTime())) {
-    exportError.value = 'Informe as datas no formato DD/MM/AAAA.'
-    return
-  }
-  if (rangeEnd < rangeStart) {
+  const rangeStart = startOfDay(exportRange.start)
+  const rangeEnd = nextDay(exportRange.end)
+  if (rangeEnd <= rangeStart) {
     exportError.value = 'A data final deve ser igual ou posterior à data inicial.'
     return
   }
 
-  emit('exportReport', rangeStart, new Date(rangeEnd.getTime() + 1))
+  emit('exportReport', rangeStart, rangeEnd)
   exportDialog.value = false
 }
 </script>
@@ -146,8 +169,15 @@ function exportSpreadsheet() {
           <span class="eyebrow">VISÃO GERAL</span>
           <h2>Horas por projeto</h2>
         </div>
-        <v-select v-model="selectedUser" class="dashboard-filter" :items="userFilterItems" item-title="name" item-value="id" label="Usuário" variant="outlined" density="compact" hide-details />
       </div>
+      <form class="dashboard-filters" @submit.prevent="updateDashboardRange">
+        <v-select v-model="selectedUser" class="dashboard-filter" :items="userFilterItems" item-title="name" item-value="id" label="Usuário" variant="outlined" density="compact" hide-details />
+        <v-date-input v-model="dashboardRange.start" label="De" input-format="dd/mm/yyyy" variant="outlined" density="compact" hide-details />
+        <v-date-input v-model="dashboardRange.end" label="Até" input-format="dd/mm/yyyy" variant="outlined" density="compact" hide-details />
+        <v-btn class="small-primary-button" type="submit" :loading="loadingSummary">Aplicar período</v-btn>
+      </form>
+      <v-alert v-if="dashboardError" class="dashboard-period-error" type="error" variant="tonal" density="compact">{{ dashboardError }}</v-alert>
+      <v-progress-linear v-if="loadingSummary" class="dashboard-progress" indeterminate color="#d96446" />
       <div class="dashboard-total"><strong>{{ formatHours(dashboardTotal) }}h</strong><span>Total registrado</span></div>
       <div class="project-summary-grid">
         <article v-for="project in dashboardRows" :key="project.id" class="project-summary-card">
@@ -237,8 +267,8 @@ function exportSpreadsheet() {
         <p class="export-copy">Selecione o período que será usado na exportação de todos os usuários.</p>
         <v-alert v-if="exportError" class="mb-4" type="error" variant="tonal" density="compact">{{ exportError }}</v-alert>
         <div class="time-fields">
-          <v-text-field v-model="exportRange.start" label="Data inicial" placeholder="DD/MM/AAAA" variant="outlined" density="comfortable" />
-          <v-text-field v-model="exportRange.end" label="Data final" placeholder="DD/MM/AAAA" variant="outlined" density="comfortable" />
+          <v-date-input v-model="exportRange.start" label="Data inicial" input-format="dd/mm/yyyy" variant="outlined" density="comfortable" />
+          <v-date-input v-model="exportRange.end" label="Data final" input-format="dd/mm/yyyy" variant="outlined" density="comfortable" />
         </div>
         <div class="modal-footer"><v-btn variant="text" @click="exportDialog = false">Cancelar</v-btn><v-btn class="small-primary-button" prepend-icon="mdi-download" @click="exportSpreadsheet">Exportar planilha</v-btn></div>
       </v-card>

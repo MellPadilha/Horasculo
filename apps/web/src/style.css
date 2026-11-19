@@ -150,7 +150,10 @@ button { font: inherit; }
 .weekly-goal-error { position: absolute; top: calc(100% + 3px); left: 0; color: #b3261e; font-size: 10px; }
 .dashboard-heading, .settings-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .dashboard-heading h2, .settings-card-heading h2 { margin: 5px 0 0; color: #303630; font-size: 16px; }
-.dashboard-filter { max-width: 220px; }
+.dashboard-filters { margin-top: 18px; display: grid; grid-template-columns: minmax(170px, 1.2fr) minmax(150px, 1fr) minmax(150px, 1fr) auto; align-items: center; gap: 10px; }
+.dashboard-filters > .v-input { min-width: 0; }
+.dashboard-period-error { margin-top: 10px; }
+.dashboard-progress { margin-top: 12px; }
 .dashboard-total { margin-top: 20px; display: flex; align-items: baseline; gap: 8px; }
 .dashboard-total strong { color: #293a31; font-size: 29px; line-height: 1; }
 .dashboard-total span { color: #8b918a; font-size: 11px; }
@@ -181,6 +184,10 @@ button { font: inherit; }
 .export-copy { margin: -8px 0 22px; color: #777e76; font-size: 12px; }
 .settings-content .v-label { color: #969b94; opacity: 1; font-size: 12px; }
 
+@media (max-width: 1100px) {
+  .dashboard-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .dashboard-filters .v-btn { grid-column: 1 / -1; justify-self: start; }
+}
 @media (max-width: 900px) {
   .sidebar { width: 216px; min-width: 216px; }
   .main-content { padding: 26px 21px; }
@@ -190,6 +197,10 @@ button { font: inherit; }
   .settings-grid { grid-template-columns: 1fr; }
   .project-summary-grid { grid-template-columns: repeat(2, 1fr); }
 }
+@media (max-width: 760px) {
+  .dashboard-filters { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .dashboard-filter { grid-column: 1 / -1; }
+}
 @media (max-width: 640px) {
   .login-card.v-card { padding: 27px 21px 23px; }
   .sidebar { display: none; }
@@ -197,7 +208,6 @@ button { font: inherit; }
   .settings-header { min-height: 50px; margin-bottom: 16px; }
   .settings-dashboard, .settings-card { padding: 17px 14px; }
   .dashboard-heading { align-items: flex-start; flex-direction: column; }
-  .dashboard-filter { width: 100%; max-width: none; }
   .weekly-goal-settings { align-items: flex-start; flex-direction: column; }
   .weekly-goal-form { width: 100%; }
   .project-summary-grid { grid-template-columns: 1fr 1fr; }
