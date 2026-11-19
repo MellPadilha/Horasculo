@@ -1,24 +1,24 @@
 # Horasculo
 
-![Ícone do Horasculo](public/brand/horasculo-icon.png)
+![Ícone do Horasculo](apps/web/public/brand/horasculo-icon.png)
 
 O Horasculo é uma interface de controle de horas de trabalho. O sistema organiza registros em um calendário, separa as horas por projeto e apresenta totais diários e semanais para facilitar o acompanhamento da jornada.
 
-## Estado do projeto
+## Estrutura do projeto
 
-Este projeto contém **somente o front-end**. Não há API, banco de dados ou servidor de autenticação.
+O Horasculo é organizado como um monorepo:
 
-Os usuários, projetos, registros, sessão e metas semanais são simulados e armazenados no `localStorage` do navegador. Portanto, os dados:
+```text
+apps/
+├── api/    # API Rust com Axum
+└── web/    # front-end Vue 3
+```
 
-- ficam disponíveis apenas no navegador e dispositivo em que foram criados;
-- podem ser apagados ao limpar os dados do navegador;
-- não são sincronizados entre dispositivos;
-- não devem ser considerados seguros para uso em produção.
+O front consome a API Rust, que persiste usuários, projetos, metas e registros no PostgreSQL. O login usa Microsoft Entra ID; a API mantém uma sessão em cookie `HttpOnly`.
 
-## Acesso de demonstração
+## Primeiro acesso
 
-- Usuário: `demo`
-- Senha: `12345`
+No Entra ID, atribua diretamente cada pessoa autorizada ao papel de aplicativo `Horasculo.User`. Atribua o grupo administrativo ao papel `Horasculo.Admin`. A API exige `Horasculo.User` mesmo para membros desse grupo. Usuários são criados no banco no primeiro login autorizado.
 
 ## Funcionalidades implementadas
 
@@ -48,22 +48,22 @@ Os usuários, projetos, registros, sessão e metas semanais são simulados e arm
 ### Meta semanal
 
 - Configuração da meta semanal de horas para cada usuário.
-- Persistência individual da meta no navegador.
+- Persistência individual da meta no PostgreSQL.
 - Indicador de progresso semanal no menu lateral.
 - Exibição das horas restantes para alcançar a meta.
 
 ### Usuários
 
-- Login e logout simulados.
-- Cadastro, edição e exclusão de usuários.
-- Proteção contra a exclusão do usuário atualmente conectado.
+- Login corporativo por OpenID Connect e logout local.
+- Contas e papéis administrados no Entra ID; revogação de sessões pelo administrador.
 - Registros de calendário separados por usuário.
 
 ### Relatórios e configurações
 
 - Visão geral das horas registradas por projeto.
 - Filtro dos totais por usuário.
-- Exportação dos registros para uma planilha `.xls`.
+- Filtro dos totais por intervalo de datas, incluindo o dia inicial e o final.
+- Exportação segura dos registros para uma planilha `.xlsx`, gerada pela API.
 - Seleção do período usado na exportação.
 - Uma aba da planilha para cada usuário.
 
@@ -79,8 +79,8 @@ O emblema de olho e relógio representa a proposta do Horasculo: visualizar, reg
 
 Os arquivos usados pela aplicação estão em:
 
-- `public/brand/horasculo-icon.png`: marca exibida na interface e em atalhos;
-- `public/brand/horasculo-favicon.png`: ícone exibido na aba do navegador.
+- `apps/web/public/brand/horasculo-icon.png`: marca exibida na interface e em atalhos;
+- `apps/web/public/brand/horasculo-favicon.png`: ícone exibido na aba do navegador.
 
 ## Tecnologias
 
@@ -90,26 +90,81 @@ Os arquivos usados pela aplicação estão em:
 - Vuetify
 - FullCalendar
 - Material Design Icons
+- Rust
+- Axum
+- Tokio
 
 ## Como executar
 
-Requisitos: Node.js e npm instalados.
+### Front-end
+
+Requisitos: Node.js na versão indicada em `.nvmrc` e npm instalados. Na raiz do repositório:
 
 ```bash
+nvm use
 npm install
-npm run dev
+npm run dev:web
 ```
 
 O terminal exibirá o endereço local da aplicação.
 
+### API e banco
+
+Requisitos: Rust, Cargo e Docker instalados. Na raiz do repositório:
+
+```bash
+docker compose up -d postgres
+cp apps/api/.env.example apps/api/.env
+set -a; source apps/api/.env; set +a
+```
+
+Antes de iniciar a API pela primeira vez, aplique as migrações com a credencial de migração:
+
+```bash
+cargo run -p horasculo-api -- migrate
+```
+
+Depois inicie normalmente:
+
+```bash
+cargo run -p horasculo-api
+```
+
+A API será iniciada em `http://127.0.0.1:3000`. O endpoint inicial é:
+
+```text
+GET /api/health
+GET /api/ready
+```
+
+Preencha `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID` e `ENTRA_CLIENT_SECRET` no ambiente local. Registre `http://localhost:5173/api/auth/callback` como URI de retorno do tipo Web no Entra. O arquivo `apps/api/.env.example` contém as demais variáveis.
+
 ## Compilação de produção
 
 ```bash
-npm run build
+npm run build:web
 ```
 
 Para visualizar localmente o resultado compilado:
 
 ```bash
-npm run preview
+npm run preview:web
 ```
+
+Esse comando recompila o frontend normalmente e abre o preview em `http://localhost:5173`. Inicie a API antes de acessar a aplicação; o login usa o Microsoft Entra ID e os dados vêm do PostgreSQL. O endereço coincide com `ALLOWED_ORIGIN` e com a URI de retorno indicados acima.
+
+Para verificar o backend:
+
+```bash
+cargo test --workspace
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+## Produção com HTTPS
+
+O Terraform em [infra/README.md](infra/README.md) provisiona a VM, DNS, segredos, logs e backups na AWS. O `compose.prod.yaml` inicia PostgreSQL, migrações, API, front-end e Caddy; só o Caddy publica portas. Os valores dos segredos são carregados em arquivos temporários no servidor por `ops/deploy.sh`. O Caddy obtém e renova o certificado TLS.
+
+### Backup e restauração
+
+O timer `horasculo-backup.timer` envia um dump diário criptografado ao S3 e mantém cópias semanais. O timer `horasculo-restore-check.timer` testa mensalmente a restauração em um contêiner isolado. O CloudWatch alerta quando o backup diário falha ou deixa de acontecer. Registros de horas não são excluídos automaticamente; a empresa deve definir sua política de retenção.

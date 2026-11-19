@@ -1,0 +1,15 @@
+[Unit]
+Description=Inicializa o Horasculo e carrega segredos
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/horasculo/ops/deploy.sh
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

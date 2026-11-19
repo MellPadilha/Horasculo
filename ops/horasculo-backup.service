@@ -1,0 +1,8 @@
+[Unit]
+Description=Backup diário do Horasculo
+After=horasculo-deploy.service
+Requires=horasculo-deploy.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/horasculo/ops/backup.sh

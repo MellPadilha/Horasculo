@@ -1,0 +1,131 @@
+x-awslogs: &awslogs
+  driver: awslogs
+  options:
+    awslogs-region: ${AWS_REGION:?defina AWS_REGION}
+    awslogs-group: ${CLOUDWATCH_LOG_GROUP:?defina CLOUDWATCH_LOG_GROUP}
+    awslogs-create-group: "false"
+
+services:
+  postgres:
+    logging: *awslogs
+    image: postgres:17-alpine@sha256:a77aa70e641402a21411b92b721c58d10f23b50ae5fdd2333efd22d166e1e5f7
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: horasculo
+      POSTGRES_USER: horasculo_migrator
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_admin_password
+    secrets: [db_admin_password, db_app_password]
+    volumes:
+      - horasculo-postgres:/var/lib/postgresql/data
+      - ./ops/postgres-init.sh:/docker-entrypoint-initdb.d/10-app-role.sh:ro
+    networks: [data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U horasculo_migrator -d horasculo"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 1g
+    pids_limit: 200
+
+  migrate:
+    logging: *awslogs
+    image: horasculo-api:${APP_VERSION:-local}
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      MIGRATION_DATABASE_URL_FILE: /run/secrets/migration_database_url
+      RUST_LOG: horasculo_api=info
+    secrets: [migration_database_url]
+    networks: [data]
+    restart: "no"
+    mem_limit: 512m
+    pids_limit: 100
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+
+  api:
+    logging: *awslogs
+    image: horasculo-api:${APP_VERSION:-local}
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      API_HOST: 0.0.0.0
+      API_PORT: 3000
+      APP_ENV: production
+      DATABASE_URL_FILE: /run/secrets/database_url
+      ENTRA_CLIENT_SECRET_FILE: /run/secrets/entra_client_secret
+      ENTRA_TENANT_ID: ${ENTRA_TENANT_ID:?defina ENTRA_TENANT_ID}
+      ENTRA_CLIENT_ID: ${ENTRA_CLIENT_ID:?defina ENTRA_CLIENT_ID}
+      ALLOWED_ORIGIN: https://${DOMAIN:?defina DOMAIN}
+      RUST_LOG: horasculo_api=info,tower_http=info,audit=info
+    secrets: [database_url, entra_client_secret]
+    networks: [edge, data]
+    mem_limit: 512m
+    pids_limit: 100
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+
+  web:
+    logging: *awslogs
+    image: horasculo-web:${APP_VERSION:-local}
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    networks: [edge]
+    mem_limit: 256m
+    pids_limit: 100
+    security_opt: [no-new-privileges:true]
+
+  proxy:
+    logging: *awslogs
+    image: caddy:2-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
+    restart: unless-stopped
+    depends_on: [api, web]
+    environment:
+      DOMAIN: ${DOMAIN:?defina DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [edge]
+    mem_limit: 256m
+    pids_limit: 100
+    security_opt: [no-new-privileges:true]
+
+secrets:
+  db_admin_password:
+    file: ${HORASCULO_SECRETS_DIR:?defina HORASCULO_SECRETS_DIR}/db_admin_password
+  db_app_password:
+    file: ${HORASCULO_SECRETS_DIR:?defina HORASCULO_SECRETS_DIR}/db_app_password
+  database_url:
+    file: ${HORASCULO_SECRETS_DIR:?defina HORASCULO_SECRETS_DIR}/database_url
+  migration_database_url:
+    file: ${HORASCULO_SECRETS_DIR:?defina HORASCULO_SECRETS_DIR}/migration_database_url
+  entra_client_secret:
+    file: ${HORASCULO_SECRETS_DIR:?defina HORASCULO_SECRETS_DIR}/entra_client_secret
+
+networks:
+  edge:
+  data:
+    internal: true
+
+volumes:
+  horasculo-postgres:
+  caddy-data:
+  caddy-config:

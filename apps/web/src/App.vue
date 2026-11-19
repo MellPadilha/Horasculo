@@ -1,53 +1,14 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import FullCalendar from '@fullcalendar/vue3'
 import timeGridPlugin from '@fullcalendar/timegrid'
 import interactionPlugin from '@fullcalendar/interaction'
 import ptBrLocale from '@fullcalendar/core/locales/pt-br'
 import type { CalendarApi, CalendarOptions, DateSelectArg, DatesSetArg, EventInput } from '@fullcalendar/core'
 import SettingsView from './components/SettingsView.vue'
-import { deleteUserRequest, listUsersRequest, loginRequest, saveUserRequest, type MockUser, type MockUserInput } from './services/mockApi'
+import { api, type Project, type SummaryEntry, type TimeEntry, type User } from './services/api'
 
-type Project = {
-  id: string
-  name: string
-  color: string
-  tint: string
-}
-
-const defaultProjects: Project[] = [
-  { id: 'aurora', name: 'Aurora Studio', color: '#c95f45', tint: '#f7c8bb' },
-  { id: 'northstar', name: 'Northstar', color: '#267d69', tint: '#bfe4d8' },
-  { id: 'fieldnotes', name: 'Fieldnotes', color: '#4f70b5', tint: '#c9d8f5' },
-  { id: 'internal', name: 'Interno', color: '#a87825', tint: '#f2dead' },
-]
-
-const projectsStorageKey = 'horas.projects'
-
-function loadProjects(): Project[] {
-  try {
-    const stored = localStorage.getItem(projectsStorageKey)
-    const savedProjects = stored ? JSON.parse(stored) as Project[] : defaultProjects
-    return savedProjects.map((project) => ({
-      ...project,
-      tint: /^#[\da-f]{8}$/i.test(project.tint) ? opaqueHex(project.tint) : project.tint,
-    }))
-  } catch {
-    return defaultProjects
-  }
-}
-
-function opaqueHex(hex: string) {
-  const red = Number.parseInt(hex.slice(1, 3), 16)
-  const green = Number.parseInt(hex.slice(3, 5), 16)
-  const blue = Number.parseInt(hex.slice(5, 7), 16)
-  const alpha = Number.parseInt(hex.slice(7, 9), 16) / 255
-  const blend = (channel: number) => Math.round(channel * alpha + 255 * (1 - alpha)).toString(16).padStart(2, '0')
-  return `#${blend(red)}${blend(green)}${blend(blue)}`
-}
-
-const projects = ref<Project[]>(loadProjects())
-watch(projects, (value) => localStorage.setItem(projectsStorageKey, JSON.stringify(value)), { deep: true })
+const projects = ref<Project[]>([])
 
 const hoursInput = (date: Date) => {
   const pad = (value: number) => String(value).padStart(2, '0')
@@ -75,85 +36,25 @@ const weekStart = ref(weekStartFor(new Date()))
 const visibleRangeStart = ref(new Date(weekStart.value))
 const visibleRangeEnd = ref(new Date(weekStart.value.getTime() + 7 * 24 * 60 * 60 * 1000))
 
-function demoEvent(day: number, startHour: number, startMinute: number, duration: number, projectId: string, title: string, hours: number): EventInput {
-  const start = new Date(weekStart.value)
-  start.setDate(start.getDate() + day)
-  start.setHours(startHour, startMinute, 0, 0)
-  const end = new Date(start.getTime() + duration * 60_000)
-  const project = projects.value.find((item) => item.id === projectId) ?? defaultProjects[0]
-  return {
-    id: `${projectId}-${day}-${startHour}`,
-    title,
-    start,
-    end,
-    backgroundColor: project.tint,
-    borderColor: project.color,
-    textColor: '#252923',
-    extendedProps: { projectId, hours },
-  }
-}
-
-const demoEvents: EventInput[] = [
-  demoEvent(0, 9, 0, 90, 'aurora', 'Direção de arte', 1.5),
-  demoEvent(0, 13, 30, 120, 'northstar', 'Revisão de produto', 2),
-  demoEvent(1, 10, 0, 120, 'fieldnotes', 'Pesquisa de conteúdo', 2),
-  demoEvent(1, 14, 0, 90, 'aurora', 'Apresentação da marca', 1.5),
-  demoEvent(2, 9, 30, 150, 'northstar', 'Planejamento da sprint', 2.5),
-  demoEvent(3, 11, 0, 60, 'internal', 'Reunião semanal', 1),
-  demoEvent(3, 14, 0, 120, 'fieldnotes', 'Protótipo de navegação', 2),
-  demoEvent(4, 9, 0, 90, 'aurora', 'Ajustes finais', 1.5),
-]
-
-const sessionStorageKey = 'horas.session'
-const weeklyGoalStorageKey = (userId: string) => `horas.weekly-goal.${userId}`
-
-function loadWeeklyGoal(userId?: string) {
-  if (!userId) return 32
-  const savedGoal = Number(localStorage.getItem(weeklyGoalStorageKey(userId)))
-  return Number.isFinite(savedGoal) && savedGoal > 0 ? savedGoal : 32
-}
-
-function loadSession(): MockUser | null {
-  try {
-    const session = localStorage.getItem(sessionStorageKey)
-    return session ? JSON.parse(session) as MockUser : null
-  } catch {
-    return null
-  }
-}
-
-const currentUser = ref<MockUser | null>(loadSession())
-const weeklyGoal = ref(loadWeeklyGoal(currentUser.value?.id))
+const currentUser = ref<User | null>(null)
+const weeklyGoal = ref(40)
+const initializing = ref(true)
 const currentPage = ref<'calendar' | 'settings'>('calendar')
-const users = ref<MockUser[]>([])
+const users = ref<User[]>([])
+const adminSummary = ref<SummaryEntry[]>([])
+const summaryNow = new Date()
+const summaryRange = reactive({
+  from: new Date(summaryNow.getFullYear(), summaryNow.getMonth(), 1),
+  to: new Date(summaryNow.getFullYear(), summaryNow.getMonth() + 1, 1),
+})
+const loadingSummary = ref(false)
+let summaryRequest = 0
 const loadingUsers = ref(false)
 const settingsError = ref('')
-const loginLoading = ref(false)
 const loginError = ref('')
-const loginForm = reactive({ username: '', password: '' })
 
-const eventsStorageKey = (userId: string) => `horas.calendar.events.${userId}`
-
-function loadEvents(userId?: string): EventInput[] {
-  if (!userId) return []
-  try {
-    const storedEvents = localStorage.getItem(eventsStorageKey(userId))
-    return storedEvents ? JSON.parse(storedEvents) as EventInput[] : demoEvents
-  } catch {
-    return demoEvents
-  }
-}
-
-function loadStoredEvents(userId: string): EventInput[] {
-  try {
-    const storedEvents = localStorage.getItem(eventsStorageKey(userId))
-    return storedEvents ? JSON.parse(storedEvents) as EventInput[] : []
-  } catch {
-    return []
-  }
-}
-
-const events = ref<EventInput[]>(loadEvents(currentUser.value?.id))
+const events = ref<EventInput[]>([])
+let entriesRequest = 0
 
 const calendarRef = ref<{ getApi: () => CalendarApi } | null>(null)
 const activeProject = ref('all')
@@ -214,45 +115,87 @@ const weekHours = computed(() => {
 
 const weekHoursLabel = computed(() => weekHours.value.toLocaleString('pt-BR', { maximumFractionDigits: 1 }))
 
-watch(events, (value) => {
-  if (!currentUser.value) return
-  try {
-    localStorage.setItem(eventsStorageKey(currentUser.value.id), JSON.stringify(value))
-  } catch {
-    // A agenda continua funcional em memória caso o armazenamento esteja indisponível.
-  }
-}, { deep: true })
+function toCalendarEvent(entry: TimeEntry): EventInput {
+  const project = projects.value.find((item) => item.id === entry.project_id)
+  return { id: entry.id, title: entry.title, start: entry.starts_at, end: entry.ends_at,
+    backgroundColor: project?.tint, borderColor: project?.color, textColor: '#252923',
+    extendedProps: { projectId: entry.project_id, hours: entry.hours } }
+}
 
-async function submitLogin() {
-  loginError.value = ''
-  if (!loginForm.username.trim() || !loginForm.password) {
-    loginError.value = 'Informe usuário e senha.'
+async function loadEntries(from = visibleRangeStart.value, to = visibleRangeEnd.value) {
+  if (!currentUser.value) return
+  const request = ++entriesRequest
+  const loaded = await api.listEntries(from, to, { userId: currentUser.value.id })
+  if (request === entriesRequest) events.value = loaded.map(toCalendarEvent)
+}
+
+async function loadWorkspace() {
+  const [loadedProjects, goal] = await Promise.all([api.listProjects(), api.getWeeklyGoal()])
+  projects.value = loadedProjects
+  weeklyGoal.value = goal.hours
+  form.projectId = projects.value[0]?.id ?? ''
+  await loadEntries()
+}
+
+const handleUnauthorized = () => {
+  currentUser.value = null
+  events.value = []
+  currentPage.value = 'calendar'
+  loginError.value = 'Sua sessão expirou. Entre novamente.'
+}
+
+onMounted(async () => {
+  window.addEventListener('horasculo:unauthorized', handleUnauthorized)
+  try {
+    currentUser.value = await api.me()
+    await loadWorkspace()
+  } catch {
+    currentUser.value = null
+  } finally {
+    Object.keys(localStorage).filter((key) => key.startsWith('horas.')).forEach((key) => localStorage.removeItem(key))
+    initializing.value = false
+  }
+})
+onBeforeUnmount(() => window.removeEventListener('horasculo:unauthorized', handleUnauthorized))
+
+function submitLogin() {
+  window.location.assign('/api/auth/start')
+}
+
+async function logout() {
+  try {
+    await api.logout()
+  } catch {
+    window.alert('Não foi possível encerrar a sessão. Tente novamente.')
     return
   }
+  currentUser.value = null
+  events.value = []
+  loginError.value = ''
+  currentPage.value = 'calendar'
+}
 
-  loginLoading.value = true
+async function loadSummary(from: Date, to: Date) {
+  const request = ++summaryRequest
+  loadingSummary.value = true
   try {
-    const user = await loginRequest(loginForm.username, loginForm.password)
-    currentUser.value = user
-    weeklyGoal.value = loadWeeklyGoal(user.id)
-    events.value = loadEvents(user.id)
-    localStorage.setItem(sessionStorageKey, JSON.stringify(user))
-    loginForm.password = ''
+    const loaded = await api.reportSummary(from, to)
+    if (request === summaryRequest) adminSummary.value = loaded
   } catch (error) {
-    loginError.value = error instanceof Error ? error.message : 'Não foi possível entrar.'
+    if (request === summaryRequest) {
+      adminSummary.value = []
+      settingsError.value = error instanceof Error ? error.message : 'Não foi possível carregar o resumo de horas.'
+    }
   } finally {
-    loginLoading.value = false
+    if (request === summaryRequest) loadingSummary.value = false
   }
 }
 
-function logout() {
-  localStorage.removeItem(sessionStorageKey)
-  currentUser.value = null
-  events.value = []
-  loginForm.username = ''
-  loginForm.password = ''
-  loginError.value = ''
-  currentPage.value = 'calendar'
+async function updateSummaryRange(from: Date, to: Date) {
+  summaryRange.from = from
+  summaryRange.to = to
+  settingsError.value = ''
+  await loadSummary(from, to)
 }
 
 async function openSettings() {
@@ -260,71 +203,59 @@ async function openSettings() {
   settingsError.value = ''
   loadingUsers.value = true
   try {
-    users.value = await listUsersRequest()
+    users.value = currentUser.value?.role === 'admin' ? await api.listUsers() : currentUser.value ? [currentUser.value] : []
+    if (currentUser.value?.role === 'admin') await loadSummary(summaryRange.from, summaryRange.to)
+    else adminSummary.value = []
+  } catch (error) {
+    settingsError.value = error instanceof Error ? error.message : 'Não foi possível carregar as configurações.'
   } finally {
     loadingUsers.value = false
   }
 }
 
-function addProject(project: Project) {
-  projects.value = [...projects.value, project]
+async function addProject(project: Project) {
+  try {
+    projects.value = [...projects.value, await api.createProject({ name: project.name, color: project.color, tint: project.tint })]
+  } catch (error) { settingsError.value = error instanceof Error ? error.message : 'Não foi possível criar o projeto.' }
 }
 
-function updateWeeklyGoal(goal: number) {
+async function updateWeeklyGoal(goal: number) {
   if (!currentUser.value) return
-  weeklyGoal.value = goal
-  localStorage.setItem(weeklyGoalStorageKey(currentUser.value.id), String(goal))
+  try { weeklyGoal.value = (await api.setWeeklyGoal(goal)).hours } catch (error) { settingsError.value = error instanceof Error ? error.message : 'Não foi possível salvar a meta.' }
 }
 
-function deleteProject(projectId: string) {
-  projects.value = projects.value.filter((project) => project.id !== projectId)
-  if (activeProject.value === projectId) activeProject.value = 'all'
+async function deleteProject(projectId: string) {
+  if (!window.confirm('Arquivar este projeto? Os registros existentes serão preservados.')) return
+  try {
+    await api.deleteProject(projectId)
+    projects.value = projects.value.filter((project) => project.id !== projectId)
+    if (activeProject.value === projectId) activeProject.value = 'all'
+  } catch (error) { settingsError.value = error instanceof Error ? error.message : 'Não foi possível arquivar o projeto.' }
 }
 
-async function saveUser(input: MockUserInput) {
+async function revokeUserSessions(userId: string) {
+  if (!window.confirm('Encerrar todas as sessões deste usuário?')) return
   settingsError.value = ''
   try {
-    const savedUser = await saveUserRequest(input)
-    users.value = await listUsersRequest()
-    if (currentUser.value?.id === savedUser.id) {
-      currentUser.value = savedUser
-      localStorage.setItem(sessionStorageKey, JSON.stringify(savedUser))
-    }
-  } catch (error) {
-    settingsError.value = error instanceof Error ? error.message : 'Não foi possível salvar o usuário.'
-  }
-}
-
-async function deleteUser(userId: string) {
-  if (userId === currentUser.value?.id) return
-  settingsError.value = ''
-  try {
-    await deleteUserRequest(userId)
-    users.value = await listUsersRequest()
-    localStorage.removeItem(eventsStorageKey(userId))
+    await api.revokeUserSessions(userId)
   } catch {
-    settingsError.value = 'Não foi possível excluir o usuário.'
+    settingsError.value = 'Não foi possível revogar as sessões.'
   }
 }
 
-const dashboardEntries = computed(() => users.value.flatMap((user) => {
-  const userEvents = user.id === currentUser.value?.id ? events.value : loadStoredEvents(user.id)
-  return userEvents.map((event) => ({
-    userId: user.id,
-    projectId: String(event.extendedProps?.projectId ?? ''),
-    hours: Number(event.extendedProps?.hours ?? 0),
-  }))
-}))
+const dashboardEntries = computed(() => adminSummary.value.map((entry) => ({ userId: entry.user_id, projectId: entry.project_id, hours: entry.hours })))
 
-const exportEntries = computed(() => users.value.flatMap((user) => {
-  const userEvents = user.id === currentUser.value?.id ? events.value : loadStoredEvents(user.id)
-  return userEvents.map((event) => ({
-    userId: user.id,
-    title: String(event.title ?? ''),
-    start: new Date(event.start as string | Date).toISOString(),
-    end: new Date(event.end as string | Date).toISOString(),
-  }))
-}))
+async function exportReport(from: Date, to: Date) {
+  settingsError.value = ''
+  try {
+    const blob = await api.downloadReport(from, to)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `horasculo-${from.toLocaleDateString('pt-BR').replaceAll('/', '-')}-a-${new Date(to.getTime() - 1).toLocaleDateString('pt-BR').replaceAll('/', '-')}.xlsx`
+    document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url)
+  } catch (error) { settingsError.value = error instanceof Error ? error.message : 'Não foi possível exportar os registros.' }
+}
 
 const visibleWeekEventCount = computed(() => {
   return visibleEvents.value.filter((event) => {
@@ -376,6 +307,7 @@ function updateWeekLabel(info: DatesSetArg) {
   visibleRangeEnd.value = new Date(info.end)
   weekStart.value = weekStartFor(info.start)
   currentView.value = info.view.type === 'timeGridDay' ? 'timeGridDay' : 'timeGridWeek'
+  void loadEntries(info.start, info.end).catch((error) => { formError.value = error instanceof Error ? error.message : 'Não foi possível carregar os registros.' })
   const end = new Date(info.end.getTime() - 24 * 60 * 60 * 1000)
   const formatter = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
   if (info.view.type === 'timeGridDay') {
@@ -409,22 +341,20 @@ function openExistingEvent(event: ReturnType<CalendarApi['getEventById']> & {}) 
   dialogOpen.value = true
 }
 
-function updateEventTime(info: { event: { id: string; start: Date | null; end: Date | null; extendedProps: Record<string, unknown>; setExtendedProp: (name: string, value: unknown) => void } }) {
+async function updateEventTime(info: { event: { id: string; start: Date | null; end: Date | null; extendedProps: Record<string, unknown>; setExtendedProp: (name: string, value: unknown) => void }; revert: () => void }) {
   if (info.event.start && info.event.end) {
-    const hours = Math.round((info.event.end.getTime() - info.event.start.getTime()) / 900_000) / 4
-    info.event.setExtendedProp('hours', hours)
-    events.value = events.value.map((event) => event.id === info.event.id
-      ? {
-          ...event,
-          start: new Date(info.event.start!),
-          end: new Date(info.event.end!),
-          extendedProps: { ...event.extendedProps, hours },
-        }
-      : event)
+    try {
+      const saved = await api.updateEntry(info.event.id, { starts_at: info.event.start.toISOString(), ends_at: info.event.end.toISOString() })
+      info.event.setExtendedProp('hours', saved.hours)
+      events.value = events.value.map((event) => event.id === saved.id ? toCalendarEvent(saved) : event)
+    } catch (error) {
+      info.revert()
+      formError.value = error instanceof Error ? error.message : 'Não foi possível alterar o horário.'
+    }
   }
 }
 
-function saveEvent() {
+async function saveEvent() {
   const start = parseDateTime(form.start)
   const end = parseDateTime(form.end)
   formError.value = ''
@@ -446,25 +376,22 @@ function saveEvent() {
     formError.value = 'Selecione um projeto.'
     return
   }
-  const event: EventInput = {
-    id: editingEventId.value ?? `event-${Date.now()}`,
-    title: form.title.trim(),
-    start,
-    end,
-    backgroundColor: project.tint,
-    borderColor: project.color,
-    textColor: '#252923',
-    extendedProps: { projectId: project.id, hours: Number(form.hours) },
-  }
-  events.value = editingEventId.value
-    ? events.value.map((item) => item.id === editingEventId.value ? event : item)
-    : [...events.value, event]
-  dialogOpen.value = false
+  try {
+    const payload = { title: form.title.trim(), project_id: project.id, starts_at: start.toISOString(), ends_at: end.toISOString() }
+    const saved = editingEventId.value ? await api.updateEntry(editingEventId.value, payload) : await api.createEntry(payload)
+    const event = toCalendarEvent(saved)
+    events.value = editingEventId.value ? events.value.map((item) => item.id === editingEventId.value ? event : item) : [...events.value, event]
+    dialogOpen.value = false
+  } catch (error) { formError.value = error instanceof Error ? error.message : 'Não foi possível salvar o registro.' }
 }
 
-function removeEvent() {
+async function removeEvent() {
   if (editingEventId.value) {
-    events.value = events.value.filter((event) => event.id !== editingEventId.value)
+    if (!window.confirm('Excluir definitivamente este registro de horas?')) return
+    try {
+      await api.deleteEntry(editingEventId.value)
+      events.value = events.value.filter((event) => event.id !== editingEventId.value)
+    } catch (error) { formError.value = error instanceof Error ? error.message : 'Não foi possível excluir o registro.'; return }
   }
   dialogOpen.value = false
 }
@@ -491,7 +418,8 @@ function openBlankEvent() {
 
 <template>
   <v-app>
-    <main v-if="!currentUser" class="login-page">
+    <main v-if="initializing" class="login-page"><v-progress-circular indeterminate color="#d96446" /></main>
+    <main v-else-if="!currentUser" class="login-page">
       <v-card class="login-card" elevation="0">
         <div class="login-brand">
           <span class="brand-mark"><img src="/brand/horasculo-icon.png" alt="" /></span>
@@ -502,14 +430,8 @@ function openBlankEvent() {
         <p class="login-subtitle">Entre para registrar e acompanhar suas horas.</p>
         <form class="login-form" @submit.prevent="submitLogin">
           <v-alert v-if="loginError" type="error" variant="tonal" density="compact">{{ loginError }}</v-alert>
-          <v-text-field v-model="loginForm.username" label="Usuário" autocomplete="username" variant="outlined" density="comfortable" autofocus />
-          <v-text-field v-model="loginForm.password" label="Senha" type="password" autocomplete="current-password" variant="outlined" density="comfortable" />
-          <v-btn class="login-button" type="submit" block :loading="loginLoading">Entrar</v-btn>
+          <v-btn class="login-button" type="submit" block>Entrar com Microsoft</v-btn>
         </form>
-        <div class="demo-access">
-          <strong>Acesso de demonstração</strong>
-          <span><code>demo</code> / <code>12345</code></span>
-        </div>
       </v-card>
     </main>
 
@@ -573,7 +495,7 @@ function openBlankEvent() {
           </div>
           <div class="profile-row">
             <div class="profile-avatar">{{ currentUser.name.charAt(0).toLocaleUpperCase('pt-BR') }}</div>
-            <div class="profile-copy"><strong>{{ currentUser.name }}</strong><span>@{{ currentUser.username }}</span></div>
+            <div class="profile-copy"><strong>{{ currentUser.name }}</strong><span>{{ currentUser.username }}</span></div>
             <v-btn icon="mdi-logout" variant="text" size="small" aria-label="Sair" title="Sair" @click="logout" />
           </div>
         </div>
@@ -620,16 +542,20 @@ function openBlankEvent() {
         :projects="projects"
         :users="users"
         :hours-entries="dashboardEntries"
-        :export-entries="exportEntries"
+        :summary-from="summaryRange.from"
+        :summary-to="summaryRange.to"
+        :loading-summary="loadingSummary"
         :current-user-id="currentUser.id"
         :loading-users="loadingUsers"
         :error-message="settingsError"
         :weekly-goal="weeklyGoal"
+        :is-admin="currentUser.role === 'admin'"
         @add-project="addProject"
         @delete-project="deleteProject"
         @update-weekly-goal="updateWeeklyGoal"
-        @save-user="saveUser"
-        @delete-user="deleteUser"
+        @revoke-user-sessions="revokeUserSessions"
+        @export-report="exportReport"
+        @update-summary-range="updateSummaryRange"
       />
     </div>
 

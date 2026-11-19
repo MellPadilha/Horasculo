@@ -1,30 +1,31 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import type { MockUser, MockUserInput } from '../services/mockApi'
+import type { User } from '../services/api'
 
 type Project = { id: string; name: string; color: string; tint: string }
 type HoursEntry = { userId: string; projectId: string; hours: number }
-type ExportEntry = { userId: string; title: string; start: string; end: string }
 
-const props = withDefaults(defineProps<{
+const props = defineProps<{
   projects: Project[]
-  users: MockUser[]
+  users: User[]
   hoursEntries: HoursEntry[]
-  exportEntries?: ExportEntry[]
+  summaryFrom: Date
+  summaryTo: Date
+  loadingSummary: boolean
   currentUserId: string
   loadingUsers: boolean
   errorMessage: string
   weeklyGoal: number
-}>(), {
-  exportEntries: () => [],
-})
+  isAdmin: boolean
+}>()
 
 const emit = defineEmits<{
   addProject: [project: Project]
   deleteProject: [projectId: string]
   updateWeeklyGoal: [goal: number]
-  saveUser: [user: MockUserInput]
-  deleteUser: [userId: string]
+  revokeUserSessions: [userId: string]
+  exportReport: [from: Date, to: Date]
+  updateSummaryRange: [from: Date, to: Date]
 }>()
 
 const projectName = ref('')
@@ -42,17 +43,15 @@ const projectPalette = [
 const projectColor = ref(projectPalette[2].color)
 const selectedUser = ref('all')
 const projectDialog = ref(false)
-const userDialog = ref(false)
 const exportDialog = ref(false)
 const projectError = ref('')
 const weeklyGoalError = ref('')
 const exportError = ref('')
-const userError = ref('')
-const userForm = reactive<MockUserInput>({ name: '', username: '', password: '' })
+const dashboardError = ref('')
 const today = new Date()
-const formatDate = (date: Date) => new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(date)
 const firstDay = new Date(today.getFullYear(), today.getMonth(), 1)
-const exportRange = reactive({ start: formatDate(firstDay), end: formatDate(today) })
+const exportRange = reactive<{ start: Date | null; end: Date | null }>({ start: firstDay, end: today })
+const dashboardRange = reactive<{ start: Date | null; end: Date | null }>({ start: props.summaryFrom, end: new Date(props.summaryTo.getTime() - 1) })
 
 const dashboardRows = computed(() => props.projects.map((project) => ({
   ...project,
@@ -99,122 +98,56 @@ function saveWeeklyGoal() {
   emit('updateWeeklyGoal', goal)
 }
 
-function openNewUser() {
-  Object.assign(userForm, { id: undefined, name: '', username: '', password: '' })
-  userError.value = ''
-  userDialog.value = true
-}
-
-function openEditUser(user: MockUser) {
-  Object.assign(userForm, { id: user.id, name: user.name, username: user.username, password: '' })
-  userError.value = ''
-  userDialog.value = true
-}
-
-function submitUser() {
-  userError.value = ''
-  if (!userForm.name.trim() || !userForm.username.trim()) {
-    userError.value = 'Informe nome e usuário.'
-    return
-  }
-  if (!userForm.id && !userForm.password) {
-    userError.value = 'Informe uma senha para o novo usuário.'
-    return
-  }
-  emit('saveUser', { ...userForm })
-  userDialog.value = false
-}
-
 function formatHours(hours: number) {
   return hours.toLocaleString('pt-BR', { maximumFractionDigits: 2 })
 }
 
-function escapeXml(value: string) {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&apos;')
+function validDate(value: Date | null): value is Date {
+  return value instanceof Date && !Number.isNaN(value.getTime())
 }
 
-function uniqueSheetName(name: string, usedNames: Set<string>) {
-  const base = name.replace(/[\\/?*\[\]:]/g, ' ').trim().slice(0, 31) || 'Usuário'
-  let candidate = base
-  let suffix = 2
-  while (usedNames.has(candidate)) {
-    const ending = ` (${suffix++})`
-    candidate = `${base.slice(0, 31 - ending.length)}${ending}`
+function startOfDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate())
+}
+
+function nextDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1)
+}
+
+function updateDashboardRange() {
+  dashboardError.value = ''
+  if (!validDate(dashboardRange.start) || !validDate(dashboardRange.end)) {
+    dashboardError.value = 'Selecione a data inicial e a data final.'
+    return
   }
-  usedNames.add(candidate)
-  return candidate
+  const from = startOfDay(dashboardRange.start)
+  const to = nextDay(dashboardRange.end)
+  if (to <= from) {
+    dashboardError.value = 'A data final deve ser igual ou posterior à inicial.'
+    return
+  }
+  if (to.getTime() - from.getTime() > 366 * 24 * 60 * 60 * 1000) {
+    dashboardError.value = 'Selecione um período de até 366 dias.'
+    return
+  }
+  emit('updateSummaryRange', from, to)
 }
 
 function exportSpreadsheet() {
   exportError.value = ''
-  if (!exportRange.start || !exportRange.end) {
+  if (!validDate(exportRange.start) || !validDate(exportRange.end)) {
     exportError.value = 'Selecione a data inicial e a data final.'
     return
   }
 
-  const parseDate = (value: string, endOfDay = false) => {
-    const match = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
-    if (!match) return new Date(Number.NaN)
-    const [, day, month, year] = match.map(Number)
-    const date = new Date(year, month - 1, day, endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0, endOfDay ? 999 : 0)
-    return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day
-      ? date
-      : new Date(Number.NaN)
-  }
-  const rangeStart = parseDate(exportRange.start)
-  const rangeEnd = parseDate(exportRange.end, true)
-  if (Number.isNaN(rangeStart.getTime()) || Number.isNaN(rangeEnd.getTime())) {
-    exportError.value = 'Informe as datas no formato DD/MM/AAAA.'
-    return
-  }
-  if (rangeEnd < rangeStart) {
+  const rangeStart = startOfDay(exportRange.start)
+  const rangeEnd = nextDay(exportRange.end)
+  if (rangeEnd <= rangeStart) {
     exportError.value = 'A data final deve ser igual ou posterior à data inicial.'
     return
   }
 
-  const header = ['Nome do evento', 'Início', 'Fim', 'Data']
-    .map((label) => `<Cell ss:StyleID="Header"><Data ss:Type="String">${label}</Data></Cell>`)
-    .join('')
-  const usedNames = new Set<string>()
-  const worksheets = props.users.map((user) => {
-    const rows = (props.exportEntries ?? [])
-      .filter((entry) => entry.userId === user.id)
-      .filter((entry) => {
-        const start = new Date(entry.start)
-        return start >= rangeStart && start <= rangeEnd
-      })
-      .sort((left, right) => new Date(left.start).getTime() - new Date(right.start).getTime())
-      .map((entry) => {
-        const start = new Date(entry.start)
-        const end = new Date(entry.end)
-        const values = [
-          entry.title,
-          start.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-          end.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-          formatDate(start),
-        ]
-        return `<Row>${values.map((value) => `<Cell><Data ss:Type="String">${escapeXml(value)}</Data></Cell>`).join('')}</Row>`
-      })
-      .join('')
-    const sheetName = uniqueSheetName(user.name, usedNames)
-    return `<Worksheet ss:Name="${escapeXml(sheetName)}"><Table><Column ss:Width="220"/><Column ss:Width="75"/><Column ss:Width="75"/><Column ss:Width="85"/><Row>${header}</Row>${rows}</Table></Worksheet>`
-  }).join('')
-
-  const workbook = `<?xml version="1.0" encoding="UTF-8"?><?mso-application progid="Excel.Sheet"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"><Styles><Style ss:ID="Header"><Font ss:Bold="1"/><Interior ss:Color="#EAF4EF" ss:Pattern="Solid"/></Style></Styles>${worksheets}</Workbook>`
-  const blob = new Blob([workbook], { type: 'application/vnd.ms-excel;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `horasculo-${exportRange.start.replaceAll('/', '-')}-a-${exportRange.end.replaceAll('/', '-')}.xls`
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  URL.revokeObjectURL(url)
+  emit('exportReport', rangeStart, rangeEnd)
   exportDialog.value = false
 }
 </script>
@@ -226,18 +159,25 @@ function exportSpreadsheet() {
         <span class="eyebrow">ADMINISTRAÇÃO</span>
         <h1>Configurações</h1>
       </div>
-      <v-btn class="export-button" variant="outlined" prepend-icon="mdi-file-export-outline" @click="exportError = ''; exportDialog = true">Exportar dados</v-btn>
+      <v-btn v-if="isAdmin" class="export-button" variant="outlined" prepend-icon="mdi-file-export-outline" @click="exportError = ''; exportDialog = true">Exportar dados</v-btn>
     </header>
     <v-alert v-if="errorMessage" class="settings-alert" type="error" variant="tonal" density="compact">{{ errorMessage }}</v-alert>
 
-    <section class="settings-dashboard">
+    <section v-if="isAdmin" class="settings-dashboard">
       <div class="dashboard-heading">
         <div>
           <span class="eyebrow">VISÃO GERAL</span>
           <h2>Horas por projeto</h2>
         </div>
-        <v-select v-model="selectedUser" class="dashboard-filter" :items="userFilterItems" item-title="name" item-value="id" label="Usuário" variant="outlined" density="compact" hide-details />
       </div>
+      <form class="dashboard-filters" @submit.prevent="updateDashboardRange">
+        <v-select v-model="selectedUser" class="dashboard-filter" :items="userFilterItems" item-title="name" item-value="id" label="Usuário" variant="outlined" density="compact" hide-details />
+        <v-date-input v-model="dashboardRange.start" label="De" input-format="dd/mm/yyyy" variant="outlined" density="compact" hide-details />
+        <v-date-input v-model="dashboardRange.end" label="Até" input-format="dd/mm/yyyy" variant="outlined" density="compact" hide-details />
+        <v-btn class="small-primary-button" type="submit" :loading="loadingSummary">Aplicar período</v-btn>
+      </form>
+      <v-alert v-if="dashboardError" class="dashboard-period-error" type="error" variant="tonal" density="compact">{{ dashboardError }}</v-alert>
+      <v-progress-linear v-if="loadingSummary" class="dashboard-progress" indeterminate color="#d96446" />
       <div class="dashboard-total"><strong>{{ formatHours(dashboardTotal) }}h</strong><span>Total registrado</span></div>
       <div class="project-summary-grid">
         <article v-for="project in dashboardRows" :key="project.id" class="project-summary-card">
@@ -260,7 +200,7 @@ function exportSpreadsheet() {
       </form>
     </section>
 
-    <div class="settings-grid">
+    <div v-if="isAdmin" class="settings-grid">
       <section class="settings-card">
         <div class="settings-card-heading"><div><span class="eyebrow">CADASTRO</span><h2>Projetos</h2></div><div class="settings-heading-actions"><span>{{ projects.length }} projetos</span><v-btn class="small-primary-button" prepend-icon="mdi-plus" @click="openNewProject">Adicionar</v-btn></div></div>
         <v-table class="settings-table" density="compact">
@@ -275,17 +215,16 @@ function exportSpreadsheet() {
       </section>
 
       <section class="settings-card">
-        <div class="settings-card-heading"><div><span class="eyebrow">ACESSOS</span><h2>Usuários</h2></div><v-btn class="small-primary-button" prepend-icon="mdi-plus" @click="openNewUser">Adicionar</v-btn></div>
+        <div class="settings-card-heading"><div><span class="eyebrow">ACESSOS</span><h2>Usuários</h2></div><span>Gerencie acessos no Microsoft Entra ID</span></div>
         <v-progress-linear v-if="loadingUsers" indeterminate color="#d96446" />
         <v-table class="settings-table" density="compact">
           <thead><tr><th>Nome</th><th>Usuário</th><th class="table-actions">Ações</th></tr></thead>
           <tbody>
             <tr v-for="user in users" :key="user.id">
               <td>{{ user.name }} <span v-if="user.id === currentUserId" class="you-badge">Você</span></td>
-              <td>@{{ user.username }}</td>
+              <td>{{ user.username }}</td>
               <td class="table-actions">
-                <v-btn icon="mdi-pencil-outline" variant="text" size="small" :aria-label="`Editar ${user.name}`" @click="openEditUser(user)" />
-                <v-btn icon="mdi-trash-can-outline" variant="text" size="small" color="error" :disabled="user.id === currentUserId" :aria-label="`Excluir ${user.name}`" @click="emit('deleteUser', user.id)" />
+                <v-btn icon="mdi-logout" variant="text" size="small" :aria-label="`Revogar sessões de ${user.name}`" @click="emit('revokeUserSessions', user.id)" />
               </td>
             </tr>
           </tbody>
@@ -322,25 +261,14 @@ function exportSpreadsheet() {
       </v-card>
     </v-dialog>
 
-    <v-dialog v-model="userDialog" max-width="480">
-      <v-card class="event-dialog">
-        <div class="dialog-heading"><div><div class="eyebrow">USUÁRIO</div><h2>{{ userForm.id ? 'Editar usuário' : 'Adicionar usuário' }}</h2></div><v-btn icon="mdi-close" variant="text" @click="userDialog = false" /></div>
-        <v-alert v-if="userError" class="mb-4" type="error" variant="tonal" density="compact">{{ userError }}</v-alert>
-        <v-text-field v-model="userForm.name" label="Nome" variant="outlined" density="comfortable" />
-        <v-text-field v-model="userForm.username" label="Usuário" variant="outlined" density="comfortable" />
-        <v-text-field v-model="userForm.password" :label="userForm.id ? 'Nova senha (opcional)' : 'Senha'" type="password" variant="outlined" density="comfortable" />
-        <div class="modal-footer"><v-btn variant="text" @click="userDialog = false">Cancelar</v-btn><v-btn class="small-primary-button" @click="submitUser">Salvar</v-btn></div>
-      </v-card>
-    </v-dialog>
-
     <v-dialog v-model="exportDialog" max-width="500">
       <v-card class="event-dialog">
         <div class="dialog-heading"><div><div class="eyebrow">PLANILHA</div><h2>Exportar dados</h2></div><v-btn icon="mdi-close" variant="text" @click="exportDialog = false" /></div>
         <p class="export-copy">Selecione o período que será usado na exportação de todos os usuários.</p>
         <v-alert v-if="exportError" class="mb-4" type="error" variant="tonal" density="compact">{{ exportError }}</v-alert>
         <div class="time-fields">
-          <v-text-field v-model="exportRange.start" label="Data inicial" placeholder="DD/MM/AAAA" variant="outlined" density="comfortable" />
-          <v-text-field v-model="exportRange.end" label="Data final" placeholder="DD/MM/AAAA" variant="outlined" density="comfortable" />
+          <v-date-input v-model="exportRange.start" label="Data inicial" input-format="dd/mm/yyyy" variant="outlined" density="comfortable" />
+          <v-date-input v-model="exportRange.end" label="Data final" input-format="dd/mm/yyyy" variant="outlined" density="comfortable" />
         </div>
         <div class="modal-footer"><v-btn variant="text" @click="exportDialog = false">Cancelar</v-btn><v-btn class="small-primary-button" prepend-icon="mdi-download" @click="exportSpreadsheet">Exportar planilha</v-btn></div>
       </v-card>

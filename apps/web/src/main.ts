@@ -1,6 +1,7 @@
 import { createApp } from 'vue'
 import { createVuetify } from 'vuetify'
 import { mdi } from 'vuetify/iconsets/mdi'
+import { pt } from 'vuetify/locale'
 import * as components from 'vuetify/components'
 import * as directives from 'vuetify/directives'
 import 'vuetify/styles'
@@ -11,6 +12,8 @@ import App from './App.vue'
 const vuetify = createVuetify({
 	components,
 	directives,
+	locale: { locale: 'pt', messages: { pt } },
+	date: { locale: { pt: 'pt-BR' } },
 	icons: {
 		defaultSet: 'mdi',
 		sets: { mdi },
